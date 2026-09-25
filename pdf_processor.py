@@ -1,6 +1,7 @@
 import pdfplumber
 import io
 import os
+import qrcode
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -19,6 +20,17 @@ def limpar_numero(texto):
     try: return float(t)
     except: return 0.0
 
+def gerar_qr_code(link):
+    # Cria o QR Code com fundo combinando com a caixa cinza clara
+    qr = qrcode.QRCode(version=1, box_size=10, border=1)
+    qr.add_data(link)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="#F4F6F9")
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
 def processar_pdfs(pdf_bytes, tipo):
     itens_extraidos = []
     referencia = "N/A"
@@ -26,7 +38,7 @@ def processar_pdfs(pdf_bytes, tipo):
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
             
-            # 1. Leitura automática do número da proposta (Ignorando quebras vazias)
+            # 1. Leitura Inteligente do Número (Ignora o "24" e pega o 03006)
             texto = page.extract_text()
             if texto:
                 linhas_texto = [linha.strip() for linha in texto.split('\n') if linha.strip()]
@@ -36,11 +48,14 @@ def processar_pdfs(pdf_bytes, tipo):
                         numeros = ''.join(c for c in linha if c.isdigit())
                         if numeros: referencia = numeros
                     
-                    # Procura System Port
+                    # Procura System Port (Procura por +4 dígitos nas próximas linhas)
                     elif tipo == 'system_port' and "ORÇAMENTO SIMPLES" in linha.upper():
-                        if i + 1 < len(linhas_texto):
-                            possivel_ref = ''.join(c for c in linhas_texto[i+1] if c.isdigit())
-                            if possivel_ref: referencia = possivel_ref
+                        for prox_linha in linhas_texto[i+1:i+4]:
+                            possivel_ref = ''.join(c for c in prox_linha if c.isdigit())
+                            # Se tiver 4 dígitos ou mais, é o orçamento e não o cliente
+                            if len(possivel_ref) >= 4:
+                                referencia = possivel_ref
+                                break
 
             # 2. Leitura da tabela de produtos
             tabelas = page.extract_tables()
@@ -74,7 +89,7 @@ def processar_pdfs(pdf_bytes, tipo):
 
 def gerar_pdf_unificado(itens, orcamento_db):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=25, bottomMargin=25)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=25, bottomMargin=20)
     elements = []
     styles = getSampleStyleSheet()
     
@@ -83,9 +98,8 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_direita = ParagraphStyle('Direita', parent=styles['Normal'], alignment=TA_RIGHT, fontSize=9)
     estilo_centro_bold = ParagraphStyle('CentroBold', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, fontName='Helvetica-Bold', textColor=colors.white)
 
-    # 1. CABEÇALHO (Logo maior e com proporção correta)
+    # --- 1. CABEÇALHO ---
     try:
-        # 140px por 70px mantém a proporção 2:1 original sem distorcer
         logo = RLImage('logo.png', width=140, height=70)
     except:
         logo = Paragraph("<b>MINAS MATERIAIS ELÉTRICOS</b>", estilo_normal)
@@ -96,17 +110,14 @@ def gerar_pdf_unificado(itens, orcamento_db):
                        Telefone: (31) 99585-2164 | CNPJ: 64.705.243/0001-08"""
     
     tabela_cabecalho = Table([[logo, Paragraph(dados_empresa, estilo_direita)]], colWidths=[160, 375])
-    tabela_cabecalho.setStyle(TableStyle([
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
-    ]))
+    tabela_cabecalho.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
     elements.append(tabela_cabecalho)
     elements.append(Spacer(1, 10))
 
-    # 2. IDENTIFICAÇÃO DO ORÇAMENTO
+    # --- 2. IDENTIFICAÇÃO DO ORÇAMENTO ---
     num_proposta_formatado = f"{300 + orcamento_db.id:05d}"
     data_hoje = orcamento_db.data_geracao.strftime("%d/%m/%Y")
-    
-    rastreabilidade = f"<font size=8>Ref. Bling: {orcamento_db.ref_bling} | Ref. MP: {orcamento_db.ref_sp}</font>"
+    rastreabilidade = f"<font size=8>Ref. MM: {orcamento_db.ref_bling} | Ref. MP: {orcamento_db.ref_sp}</font>"
 
     dados_proposta = [
         [Paragraph(f"PROPOSTA COMERCIAL Nº {num_proposta_formatado}", estilo_centro_bold)],
@@ -119,15 +130,13 @@ def gerar_pdf_unificado(itens, orcamento_db):
         ('BACKGROUND', (0,0), (-1,0), cor_marca),
         ('BACKGROUND', (0,1), (-1,1), colors.HexColor("#F9F9F9")),
         ('BOX', (0,0), (-1,-1), 1, colors.HexColor("#DDDDDD")),
-        ('BOTTOMPADDING', (0,0), (-1,0), 6),
-        ('TOPPADDING', (0,0), (-1,0), 6),
-        ('BOTTOMPADDING', (0,1), (-1,1), 8),
-        ('TOPPADDING', (0,1), (-1,1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,1), 8),
+        ('TOPPADDING', (0,0), (-1,1), 8),
     ]))
     elements.append(tabela_identificacao)
     elements.append(Spacer(1, 15))
 
-    # 3. TABELA DE ITENS
+    # --- 3. TABELA DE ITENS ---
     dados_tabela = [["Código", "Descrição do produto", "Un", "Qtd", "V. Unitário", "V. Total"]]
     total_geral = 0.0
     soma_qtdes = 0.0
@@ -156,11 +165,10 @@ def gerar_pdf_unificado(itens, orcamento_db):
         ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
     ]))
-    
     elements.append(tabela_itens)
     elements.append(Spacer(1, 15))
 
-    # 4. TABELA DE RESUMO (Total em Verde Escuro Elegante)
+    # --- 4. TABELA DE RESUMO ---
     total_formatado = f"R$ {total_geral:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     soma_qtdes_formatada = f"{soma_qtdes:.2f}".rstrip('0').rstrip('.') if soma_qtdes % 1 != 0 else str(int(soma_qtdes))
     
@@ -175,21 +183,83 @@ def gerar_pdf_unificado(itens, orcamento_db):
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('FONTNAME', (2,1), (2,1), 'Helvetica-Bold'), 
-        ('TEXTCOLOR', (2,1), (2,1), colors.HexColor("#1B5E20")), # Verde Escuro Corporativo
+        ('TEXTCOLOR', (2,1), (2,1), colors.HexColor("#1B5E20")), 
         ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
-        ('BOTTOMPADDING', (0,0), (-1,0), 7),
-        ('TOPPADDING', (0,0), (-1,0), 7),
-        ('BOTTOMPADDING', (0,1), (-1,1), 8),
-        ('TOPPADDING', (0,1), (-1,1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,1), 7),
+        ('TOPPADDING', (0,0), (-1,1), 7),
     ]))
     tabela_resumo.hAlign = 'RIGHT'
     elements.append(tabela_resumo)
-    elements.append(Spacer(1, 30))
+    elements.append(Spacer(1, 20))
 
-    # 5. ASSINATURA
-    elements.append(Paragraph("Atenciosamente,", estilo_normal))
-    elements.append(Spacer(1, 4))
-    elements.append(Paragraph("<b>Departamento de vendas</b><br/>Minas Materiais Elétricos", estilo_normal))
+    # --- 5. BANNER DE WHATSAPP COM QR CODE ---
+    whatsapp_url = "https://wa.me/5531995852164?text=GOSTARIA%20DE%20TIRAR%20UMA%20DUVIDA%20REFERENTE%20AO%20MEU%20OR%C3%87AMENTO"
+    qr_buffer = gerar_qr_code(whatsapp_url)
+    img_qr = RLImage(qr_buffer, width=65, height=65)
+
+    estilo_duvida_titulo = ParagraphStyle('DuvidaTitulo', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.HexColor("#1e2b4d"))
+    estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
+    estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
+    
+    # Botão Clicável Verde (Manda para o Whatsapp ao clicar no PDF)
+    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white" style="text-decoration:none;">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
+    btn_zap.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+
+    bloco_esq = [
+        Paragraph("Ficou com alguma dúvida sobre seu orçamento?", estilo_duvida_titulo),
+        Spacer(1, 4),
+        Paragraph("Nossa equipe está pronta para atendê-lo.", estilo_duvida_texto),
+        Spacer(1, 8),
+        btn_zap
+    ]
+
+    estilo_qr_texto = ParagraphStyle('QRTexto', parent=styles['Normal'], fontSize=7, textColor=colors.gray, alignment=TA_CENTER)
+    bloco_meio = [
+        Paragraph("Ou escaneie o QR Code<br/>para conversar conosco:", estilo_qr_texto),
+        Spacer(1, 3),
+        img_qr
+    ]
+
+    # Reaproveita a sua própria logo para ilustrar o lado direito
+    try:
+        logo_ilustra = RLImage('logo.png', width=100, height=50)
+    except:
+        logo_ilustra = Paragraph(" ", estilo_normal)
+
+    tabela_banner = Table([[bloco_esq, bloco_meio, logo_ilustra]], colWidths=[230, 160, 145])
+    tabela_banner.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F4F6F9")), # Fundo cinza bem claro
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (1,0), (1,0), 'CENTER'),
+        ('ALIGN', (2,0), (2,0), 'RIGHT'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+        ('TOPPADDING', (0,0), (-1,-1), 12),
+        ('LEFTPADDING', (0,0), (-1,-1), 15),
+        ('RIGHTPADDING', (0,0), (-1,-1), 15),
+    ]))
+    elements.append(tabela_banner)
+    
+    # --- 6. RODAPÉ ESCURO FINAL (SITE E TELEFONE) ---
+    estilo_rodape = ParagraphStyle('Rodape', parent=styles['Normal'], fontSize=8, textColor=colors.white)
+    estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
+    estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
+    
+    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white" style="text-decoration:none;">www.minasmateriaiseletricos.com.br</a>'
+    
+    tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
+    tabela_rodape.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#1e2b4d")), # Azul Marinho super escuro
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('TOPPADDING', (0,0), (-1,-1), 8),
+        ('LEFTPADDING', (0,0), (-1,-1), 15),
+        ('RIGHTPADDING', (0,0), (-1,-1), 15),
+    ]))
+    elements.append(tabela_rodape)
 
     doc.build(elements)
     buffer.seek(0)
