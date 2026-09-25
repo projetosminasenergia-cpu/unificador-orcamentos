@@ -15,7 +15,8 @@ class Orcamento(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nome_identificador = db.Column(db.String(150), nullable=False)
     ref_bling = db.Column(db.String(50)) 
-    ref_sp = db.Column(db.String(50))    
+    ref_sp = db.Column(db.String(50)) 
+    ref_ue = db.Column(db.String(50)) # Nova coluna da Universo Eletrico
     data_geracao = db.Column(db.DateTime, default=datetime.utcnow)
     valor_total = db.Column(db.Float, default=0.0)
     itens = db.relationship('Item', backref='orcamento', lazy=True)
@@ -47,15 +48,23 @@ def index():
 def mesclar():
     nome_identificador = request.form.get('nome_identificador')
     
+    # Captura a margem % digitada (Se vier vazia, usa 0)
+    margem_ue_str = request.form.get('margem_ue', '0')
+    try:
+        margem_ue = float(margem_ue_str.replace(',', '.'))
+    except:
+        margem_ue = 0.0
+    
     pdf_x = request.files.get('pdf_x')
     pdf_y = request.files.get('pdf_y')
+    pdf_z = request.files.get('pdf_z') # Arquivo da Universo Eletrico
 
     itens_consolidados = []
     ref_bling_extraida = "N/A"
     ref_sp_extraida = "N/A"
+    ref_ue_extraida = "N/A"
     
     if pdf_x and pdf_x.filename:
-        # Agora ele recebe os itens E a referência automaticamente
         itens, ref = processar_pdfs(pdf_x.read(), tipo='bling')
         itens_consolidados.extend(itens)
         if ref != "N/A": ref_bling_extraida = ref
@@ -64,13 +73,18 @@ def mesclar():
         itens, ref = processar_pdfs(pdf_y.read(), tipo='system_port')
         itens_consolidados.extend(itens)
         if ref != "N/A": ref_sp_extraida = ref
+        
+    if pdf_z and pdf_z.filename:
+        itens, ref = processar_pdfs(pdf_z.read(), tipo='universo_eletrico', margem=margem_ue)
+        itens_consolidados.extend(itens)
+        if ref != "N/A": ref_ue_extraida = ref
 
     if not itens_consolidados:
         return "Nenhum arquivo enviado ou erro na leitura da tabela.", 400
 
     total = sum(float(i.get('valor_total_num', 0)) for i in itens_consolidados)
     
-    novo_orcamento = Orcamento(nome_identificador=nome_identificador, ref_bling=ref_bling_extraida, ref_sp=ref_sp_extraida, valor_total=total)
+    novo_orcamento = Orcamento(nome_identificador=nome_identificador, ref_bling=ref_bling_extraida, ref_sp=ref_sp_extraida, ref_ue=ref_ue_extraida, valor_total=total)
     db.session.add(novo_orcamento)
     db.session.commit()
 
