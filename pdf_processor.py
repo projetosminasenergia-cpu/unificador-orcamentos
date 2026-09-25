@@ -70,7 +70,6 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
 
             # --- 2. EXTRAÇÃO DOS PRODUTOS ---
             if tipo == 'universo_eletrico':
-                # NOVA LÓGICA EXCLUSIVA: Lê como texto bruto para não perder itens da Página 2
                 if texto:
                     linhas_texto = texto.split('\n')
                     for linha in linhas_texto:
@@ -79,29 +78,24 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                             v_tot_str = parts[-1]
                             v_unit_str = parts[-2]
                             
-                            # Verifica se parece moeda (aceita Ponto OU Vírgula agora!)
                             if (',' in v_tot_str or '.' in v_tot_str) and (',' in v_unit_str or '.' in v_unit_str):
                                 v_tot_base = limpar_numero(v_tot_str)
                                 v_unit_base = limpar_numero(v_unit_str)
                                 
-                                # Valida se os números são maiores que zero
                                 if v_unit_base > 0 and v_tot_base > 0:
                                     cod = parts[0]
-                                    # Verifica se o código é o índice (1, 2, 3...)
                                     if len(cod) <= 3 and parts[1].isdigit():
                                         cod = parts[1]
                                         desc = " ".join(parts[2:-2])
                                     else:
                                         desc = " ".join(parts[1:-2])
                                         
-                                    # Filtro de lixo
                                     if "DESCRIC" in desc.upper() or "TOTAL" in desc.upper(): continue
                                     if cod.isalpha(): continue
                                     
                                     unid = "UN"
                                     qtd = round(v_tot_base / v_unit_base, 2)
                                     
-                                    # Aplica a Margem Comercial!
                                     fator = 1 + (margem / 100.0)
                                     v_unit = round(v_unit_base * fator, 2)
                                     v_tot = round(qtd * v_unit, 2)
@@ -112,7 +106,6 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                                         "valor_unitario_num": v_unit, "valor_total_num": v_tot
                                     })
             else:
-                # LÓGICA ORIGINAL: Tabelas normais para Bling e System Port
                 tabelas = page.extract_tables()
                 for tabela in tabelas:
                     for linha in tabela:
@@ -250,7 +243,8 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
     estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
     
-    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white" style="text-decoration:none;">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
+    # Olha que maravilha, nada de style="text-decoration:none;" aqui:
+    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
     btn_zap.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
@@ -294,7 +288,8 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
     estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
     
-    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white" style="text-decoration:none;">www.minasmateriaiseletricos.com.br</a>'
+    # E nada de style aqui também:
+    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white">www.minasmateriaiseletricos.com.br</a>'
     
     tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
     tabela_rodape.setStyle(TableStyle([
