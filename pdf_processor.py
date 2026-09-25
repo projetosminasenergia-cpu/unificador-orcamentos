@@ -26,23 +26,23 @@ def processar_pdfs(pdf_bytes, tipo):
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
             
-            # 1. Tentar ler o número do orçamento no texto da página (Automatização)
+            # 1. Tentar ler o número do orçamento (Agora à prova de falhas)
             texto = page.extract_text()
             if texto:
-                linhas_texto = texto.split('\n')
+                # Remove todas as linhas vazias invisíveis
+                linhas_texto = [linha.strip() for linha in texto.split('\n') if linha.strip()]
                 for i, linha in enumerate(linhas_texto):
-                    if tipo == 'bling' and "Proposta N" in linha:
-                        # Corta a frase e pega só os números depois de "Proposta N°"
-                        partes = linha.split("Proposta N")
-                        if len(partes) > 1:
-                            referencia = ''.join(c for c in partes[1] if c.isdigit())
-                            
+                    # Procura o número no Bling
+                    if tipo == 'bling' and "PROPOSTA N" in linha.upper():
+                        numeros = ''.join(c for c in linha if c.isdigit())
+                        if numeros: referencia = numeros
+                    
+                    # Procura o número no System Port
                     elif tipo == 'system_port' and "ORÇAMENTO SIMPLES" in linha.upper():
-                        # No System Port, o número costuma estar na linha de baixo
                         if i + 1 < len(linhas_texto):
-                            possivel_ref = linhas_texto[i+1].strip()
-                            if possivel_ref.isdigit():
-                                referencia = possivel_ref
+                            # Pega a próxima linha (que agora garantidamente não é vazia)
+                            possivel_ref = ''.join(c for c in linhas_texto[i+1] if c.isdigit())
+                            if possivel_ref: referencia = possivel_ref
 
             # 2. Ler as tabelas de itens
             tabelas = page.extract_tables()
@@ -85,6 +85,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_direita = ParagraphStyle('Direita', parent=styles['Normal'], alignment=TA_RIGHT, fontSize=9)
     estilo_centro_bold = ParagraphStyle('CentroBold', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, fontName='Helvetica-Bold', textColor=colors.white)
 
+    # 1. LOGO E CABEÇALHO
     try:
         logo = RLImage('logo.png', width=120, height=45)
     except:
@@ -102,6 +103,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     elements.append(tabela_cabecalho)
     elements.append(Spacer(1, 10))
 
+    # 2. CAIXA DE IDENTIFICAÇÃO DO ORÇAMENTO
     num_proposta_formatado = f"{300 + orcamento_db.id:05d}"
     data_hoje = orcamento_db.data_geracao.strftime("%d/%m/%Y")
     
@@ -126,6 +128,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     elements.append(tabela_identificacao)
     elements.append(Spacer(1, 20))
 
+    # 3. TABELA DE ITENS
     dados_tabela = [["Código", "Descrição do produto", "Un", "Qtd", "V. Unitário", "V. Total"]]
     total_geral = 0.0
     soma_qtdes = 0.0
@@ -158,6 +161,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     elements.append(tabela_itens)
     elements.append(Spacer(1, 20))
 
+    # 4. TABELA DE RESUMO
     total_formatado = f"R$ {total_geral:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     soma_qtdes_formatada = f"{soma_qtdes:.2f}".rstrip('0').rstrip('.') if soma_qtdes % 1 != 0 else str(int(soma_qtdes))
     
@@ -181,6 +185,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     elements.append(tabela_resumo)
     elements.append(Spacer(1, 40))
 
+    # 5. RODAPÉ
     elements.append(Paragraph("Atenciosamente,", estilo_normal))
     elements.append(Spacer(1, 5))
     elements.append(Paragraph("<b>Departamento de vendas</b><br/>Minas Materiais Elétricos", estilo_normal))
