@@ -3,5 +3,5 @@ pdfplumber==0.10.3
 reportlab==4.0.8
 Werkzeug==3.0.1
 Flask-SQLAlchemy==3.1.1
-psycopg2-binary==2.9.9
+psycopg[binary]
 gunicorn==21.2.0
