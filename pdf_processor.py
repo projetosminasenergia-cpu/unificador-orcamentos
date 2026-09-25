@@ -1,9 +1,11 @@
 import pdfplumber
 import io
+from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_RIGHT, TA_CENTER
 
 def processar_pdfs(pdf_bytes, tipo):
     itens_extraidos = []
@@ -12,18 +14,15 @@ def processar_pdfs(pdf_bytes, tipo):
             tabelas = page.extract_tables()
             for tabela in tabelas:
                 for linha in tabela:
-                    # Limpa a linha e garante que tudo é texto
                     l = [str(celula).strip() if celula else "" for celula in linha]
                     texto_linha = " ".join(l).upper()
 
-                    # Pula lixo (cabeçalhos, rodapés, imagens)
                     if not texto_linha.strip(): continue
                     if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
                     if "VENCIMENTO" in texto_linha or "TOTAL" in texto_linha or "Nº DE ITENS" in texto_linha: continue
                     if "IMAGEM" in texto_linha or "AVISTA" in texto_linha: continue
 
                     try:
-                        # Extração do Bling
                         if tipo == 'bling':
                             if len(l) < 6: continue
                             cod = l[0]
@@ -32,23 +31,19 @@ def processar_pdfs(pdf_bytes, tipo):
                             unid = l[3]
                             v_unit_str = l[4].replace('R$', '').replace('.', '').replace(',', '.')
                             v_tot_str = l[5].replace('R$', '').replace('.', '').replace(',', '.')
-                        
-                        # Extração Corrigida do System Port
                         else:
                             if len(l) < 6: continue
                             cod = l[1]
                             desc = l[2].replace('\n', ' ')
-                            unid = "UN" # Forçamos UN pois o layout do System Port junta colunas
+                            unid = "UN"
                             qtd_str = l[3].replace(',', '.') if len(l) > 3 else "0"
                             v_unit_str = l[4].replace('R$', '').replace('.', '').replace(',', '.') if len(l) > 4 else "0"
                             v_tot_str = l[5].replace('R$', '').replace('.', '').replace(',', '.') if len(l) > 5 else v_unit_str
 
-                        # Transformação segura para números
                         qtd = float(qtd_str) if qtd_str.replace('.','',1).isdigit() else 0.0
                         v_unit = float(v_unit_str) if v_unit_str.replace('.','',1).isdigit() else 0.0
                         v_tot = float(v_tot_str) if v_tot_str.replace('.','',1).isdigit() else (qtd * v_unit)
 
-                        # Se não for peça (preço e qtd zero), descarta
                         if qtd == 0 and v_unit == 0: continue
 
                         item = {
@@ -61,62 +56,128 @@ def processar_pdfs(pdf_bytes, tipo):
                         }
                         itens_extraidos.append(item)
                     except Exception as e:
-                        print("Ignorando linha problemática:", l)
                         continue
     return itens_extraidos
 
 def gerar_pdf_unificado(itens):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+    # Margens ajustadas para aproveitar melhor o espaço (A4 width = 595. 595 - 30 - 30 = 535)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elements = []
     styles = getSampleStyleSheet()
     
-    # Criamos um estilo específico para a descrição, para ela quebrar de linha bonitinho
-    estilo_desc = styles['Normal']
-    estilo_desc.fontSize = 8 
+    # Estilos de texto personalizados
+    estilo_normal = styles['Normal']
+    estilo_desc = ParagraphStyle('Descricao', parent=styles['Normal'], fontSize=8, leading=10)
+    estilo_direita = ParagraphStyle('Direita', parent=styles['Normal'], alignment=TA_RIGHT, fontSize=9)
+    estilo_titulo = ParagraphStyle('Titulo', parent=styles['Heading2'], fontSize=14, spaceAfter=10)
+
+    # --- 1. CABEÇALHO (Logo e Dados da Empresa) ---
+    logo_texto = """<font size="16"><b>MINAS MATERIAIS ELÉTRICOS</b></font><br/><br/>
+                    <font size="10">Orçamento Consolidado</font>"""
     
-    header_text = "<b>MINAS MATERIAIS ELÉTRICOS LTDA</b><br/>CNPJ: 64.705.243/0001-08<br/>Orçamento Consolidado"
-    elements.append(Paragraph(header_text, styles['Normal']))
-    elements.append(Spacer(1, 20))
+    dados_empresa = """<b>MINAS MATERIAIS ELETRICOS LTDA</b><br/>
+                       Rua José Botelho Moreira, N° 394, LOTE 07<br/>
+                       35431404 - Ponte Nova, MG<br/>
+                       Telefone: (31) 99585-2164<br/>
+                       CNPJ: 64.705.243/0001-08"""
     
-    dados_tabela = [["Código", "Descrição", "Unid", "Qtd", "V. Unit", "V. Total"]]
+    tabela_cabecalho = Table([
+        [Paragraph(logo_texto, estilo_normal), Paragraph(dados_empresa, estilo_direita)]
+    ], colWidths=[267, 268])
+    tabela_cabecalho.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+    ]))
+    
+    elements.append(tabela_cabecalho)
+    elements.append(Spacer(1, 15))
+
+    # --- 2. DADOS DA PROPOSTA ---
+    data_hoje = datetime.now().strftime("%d/%m/%Y")
+    info_proposta = f"<b>Data da emissão:</b> {data_hoje}"
+    elements.append(Paragraph(info_proposta, estilo_normal))
+    elements.append(Spacer(1, 15))
+    
+    elements.append(Paragraph("<b>Itens da proposta comercial</b>", estilo_titulo))
+
+    # --- 3. TABELA DE ITENS ---
+    # Cabeçalho da tabela igual ao Bling
+    dados_tabela = [["Código", "Descrição do produto/serviço", "Un", "Qtd.", "Preço un.", "Preço total"]]
+    
     total_geral = 0.0
+    soma_qtdes = 0.0
+    num_itens = len(itens)
     
     for item in itens:
         v_unit_str = f"R$ {item.get('valor_unitario_num', 0):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
         v_tot_str = f"R$ {item.get('valor_total_num', 0):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-        total_geral += float(item.get('valor_total_num', 0))
         
-        # O Paragraph impede que o texto invada outras colunas
+        total_geral += float(item.get('valor_total_num', 0))
+        soma_qtdes += float(item.get('quantidade', 0))
+        
+        # Paragraph para a descrição quebrar de linha sem desalinhar a tabela
         desc_paragraph = Paragraph(item.get('descricao', ''), estilo_desc)
         
+        # Formatação de quantidade para remover o .0 se for inteiro
+        qtd_formatada = f"{item.get('quantidade', 0):.2f}".rstrip('0').rstrip('.') if item.get('quantidade', 0) % 1 != 0 else str(int(item.get('quantidade', 0)))
+
         dados_tabela.append([
             item.get('codigo', ''),
-            desc_paragraph, # Usamos o paragraph aqui no lugar do texto simples
+            desc_paragraph,
             item.get('unidade', ''),
-            str(item.get('quantidade', '')),
+            qtd_formatada,
             v_unit_str,
             v_tot_str
         ])
 
-    total_formatado = f"R$ {total_geral:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-    dados_tabela.append(["", "", "", "", "TOTAL GERAL:", total_formatado])
-
-    t = Table(dados_tabela, colWidths=[60, 240, 30, 40, 65, 75])
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#f0f0f0")),
+    # Construção da tabela de itens
+    tabela_itens = Table(dados_tabela, colWidths=[60, 245, 30, 40, 75, 85])
+    tabela_itens.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#f0f0f0")), # Cinza claro no cabeçalho
         ('TEXTCOLOR', (0,0), (-1,0), colors.black),
-        ('ALIGN', (0,0), (-1,0), 'CENTER'),
+        ('ALIGN', (0,0), (-1,0), 'LEFT'),
+        ('ALIGN', (2,0), (-1,-1), 'CENTER'), # Un, Qtd e Valores centralizados
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0,0), (-1,0), 10),
-        ('BACKGROUND', (0,1), (-1,-1), colors.white),
-        ('GRID', (0,0), (-1,-2), 1, colors.black),
-        ('LINEABOVE', (4,-1), (5,-1), 1, colors.black),
-        ('FONTNAME', (4,-1), (5,-1), 'Helvetica-Bold'),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), # Alinha os textos ao meio
+        ('BOTTOMPADDING', (0,0), (-1,0), 8),
+        ('TOPPADDING', (0,0), (-1,0), 8),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey), # Bordas finas cinzas
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
     ]))
     
-    elements.append(t)
+    elements.append(tabela_itens)
+    elements.append(Spacer(1, 20))
+
+    # --- 4. TABELA DE RESUMO (Fiel ao modelo) ---
+    total_formatado = f"R$ {total_geral:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    soma_qtdes_formatada = f"{soma_qtdes:.2f}".rstrip('0').rstrip('.') if soma_qtdes % 1 != 0 else str(int(soma_qtdes))
+    
+    dados_resumo = [
+        ["N° de Itens", "Soma das Qtdes", "Total da proposta"],
+        [str(num_itens), soma_qtdes_formatada, total_formatado]
+    ]
+    
+    tabela_resumo = Table(dados_resumo, colWidths=[100, 100, 120])
+    tabela_resumo.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#f0f0f0")),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTNAME', (2,1), (2,1), 'Helvetica-Bold'), # Total em negrito
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('TOPPADDING', (0,0), (-1,-1), 8),
+    ]))
+    
+    # Alinhando a tabela de resumo à direita
+    tabela_resumo.hAlign = 'RIGHT'
+    elements.append(tabela_resumo)
+    elements.append(Spacer(1, 40))
+
+    # --- 5. RODAPÉ DE ASSINATURA ---
+    elements.append(Paragraph("Atenciosamente,", estilo_normal))
+    elements.append(Spacer(1, 5))
+    elements.append(Paragraph("<b>Departamento de vendas</b>", estilo_normal))
+
+    # Gera o arquivo
     doc.build(elements)
     buffer.seek(0)
     return buffer
