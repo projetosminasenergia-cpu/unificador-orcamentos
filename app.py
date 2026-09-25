@@ -1,10 +1,15 @@
 import os
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, send_file, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from functools import wraps
 from pdf_processor import processar_pdfs, gerar_pdf_unificado
 
 app = Flask(__name__)
+
+# --- CONFIGURAÇÕES DE SEGURANÇA E SENHA ---
+app.secret_key = 'chave_secreta_super_segura_minas' # Necessário para o sistema se lembrar de quem entrou
+SENHA_SISTEMA = "minasme2026!" # <--- ALTERE A SUA SENHA AQUI SE DESEJAR!
 
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -34,14 +39,44 @@ class Item(db.Model):
 with app.app_context():
     db.create_all()
 
-# --- ROTA MÁGICA PARA ATUALIZAR O BANCO DE DADOS ---
+# --- CADEADO DO SISTEMA ---
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('logado'):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# --- ROTAS DE LOGIN E LOGOUT ---
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    erro = None
+    if request.method == 'POST':
+        senha_digitada = request.form.get('senha')
+        if senha_digitada == SENHA_SISTEMA:
+            session['logado'] = True
+            return redirect(url_for('index'))
+        else:
+            erro = "Senha incorreta. Tente novamente."
+    return render_template('login.html', erro=erro)
+
+@app.route('/logout')
+def logout():
+    session.pop('logado', None)
+    return redirect(url_for('login'))
+
+# --- ROTAS DO SISTEMA (AGORA PROTEGIDAS) ---
+
 @app.route('/atualizar-banco')
+@login_required
 def atualizar_banco():
-    db.drop_all()    # Apaga toda a estrutura velha travada
-    db.create_all()  # Cria a estrutura nova e limpa
-    return "<h1>Banco de dados atualizado com sucesso!</h1><p>Todas as colunas (incluindo a da Universo Elétrico) foram criadas.</p><a href='/'>Clique aqui para voltar ao sistema</a>"
+    db.drop_all()
+    db.create_all()
+    return "<h1>Banco de dados atualizado com sucesso!</h1><a href='/'>Clique aqui para voltar ao sistema</a>"
 
 @app.route('/', methods=['GET'])
+@login_required
 def index():
     busca = request.args.get('busca', '')
     if busca:
@@ -52,6 +87,7 @@ def index():
     return render_template('index.html', historico=historico, busca=busca)
 
 @app.route('/mesclar', methods=['POST'])
+@login_required
 def mesclar():
     nome_identificador = request.form.get('nome_identificador')
     
@@ -111,6 +147,7 @@ def mesclar():
     return send_file(pdf_buffer, as_attachment=True, download_name=f"Proposta_{novo_orcamento.id}_{nome_identificador}.pdf", mimetype="application/pdf")
 
 @app.route('/baixar_pdf/<int:id_orcamento>')
+@login_required
 def baixar_pdf(id_orcamento):
     orcamento = Orcamento.query.get_or_404(id_orcamento)
     itens = []
