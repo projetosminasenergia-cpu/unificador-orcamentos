@@ -47,6 +47,7 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
         for page in pdf.pages:
             texto = page.extract_text()
             
+            # --- 1. LEITURA DAS REFERÊNCIAS ---
             if texto:
                 linhas_texto = [linha.strip() for linha in texto.split('\n') if linha.strip()]
                 for i, linha in enumerate(linhas_texto):
@@ -67,58 +68,77 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                             numeros = ''.join(c for c in partes[1].split('[')[0] if c.isdigit())
                             if numeros: referencia = numeros
 
-            settings = {"vertical_strategy": "text", "horizontal_strategy": "text"} if tipo == 'universo_eletrico' else {}
-            tabelas = page.extract_tables(settings)
-            
-            for tabela in tabelas:
-                for linha in tabela:
-                    l_bruta = [str(celula).strip() if celula else "" for celula in linha]
-                    l = [c for c in l_bruta if c != ""]
-                    if not l: continue
-                    texto_linha = " ".join(l).upper()
-
-                    if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
-                    if "VENCIMENTO" in texto_linha or "TOTAL" in texto_linha or "Nº DE ITENS" in texto_linha: continue
-                    if "IMAGEM" in texto_linha or "AVISTA" in texto_linha or "ÍTEM" in texto_linha: continue
-                    if "DESCRICÃO DO PRODUTO" in texto_linha or "NCM" in texto_linha: continue
-
-                    try:
-                        if tipo == 'universo_eletrico':
-                            if len(l) < 3: continue
+            # --- 2. EXTRAÇÃO DOS PRODUTOS ---
+            if tipo == 'universo_eletrico':
+                # NOVA LÓGICA EXCLUSIVA: Lê como texto bruto para não perder itens da Página 2
+                if texto:
+                    linhas_texto = texto.split('\n')
+                    for linha in linhas_texto:
+                        parts = linha.strip().split()
+                        if len(parts) >= 4:
+                            v_tot_str = parts[-1]
+                            v_unit_str = parts[-2]
                             
-                            if ',' not in l[-1] or ',' not in l[-2]:
-                                continue 
+                            # Verifica se parece moeda (aceita Ponto OU Vírgula agora!)
+                            if (',' in v_tot_str or '.' in v_tot_str) and (',' in v_unit_str or '.' in v_unit_str):
+                                v_tot_base = limpar_numero(v_tot_str)
+                                v_unit_base = limpar_numero(v_unit_str)
                                 
-                            cod = l[0].split('\n')[-1].strip()
-                            
-                            if cod.isalpha(): continue
-                            
-                            desc = " ".join(l[1:-2]).replace('\n', ' ')
-                            unid = "UN"
-                            v_unit_base = limpar_numero(l[-2])
-                            v_tot_base = limpar_numero(l[-1])
-                            
-                            if v_unit_base == 0: continue
-                            qtd = round(v_tot_base / v_unit_base, 2)
-                            
-                            fator = 1 + (margem / 100.0)
-                            v_unit = round(v_unit_base * fator, 2)
-                            v_tot = round(qtd * v_unit, 2)
+                                # Valida se os números são maiores que zero
+                                if v_unit_base > 0 and v_tot_base > 0:
+                                    cod = parts[0]
+                                    # Verifica se o código é o índice (1, 2, 3...)
+                                    if len(cod) <= 3 and parts[1].isdigit():
+                                        cod = parts[1]
+                                        desc = " ".join(parts[2:-2])
+                                    else:
+                                        desc = " ".join(parts[1:-2])
+                                        
+                                    # Filtro de lixo
+                                    if "DESCRIC" in desc.upper() or "TOTAL" in desc.upper(): continue
+                                    if cod.isalpha(): continue
+                                    
+                                    unid = "UN"
+                                    qtd = round(v_tot_base / v_unit_base, 2)
+                                    
+                                    # Aplica a Margem Comercial!
+                                    fator = 1 + (margem / 100.0)
+                                    v_unit = round(v_unit_base * fator, 2)
+                                    v_tot = round(qtd * v_unit, 2)
+                                    
+                                    itens_extraidos.append({
+                                        "codigo": cod[:100], "descricao": desc[:250], 
+                                        "quantidade": qtd, "unidade": unid, 
+                                        "valor_unitario_num": v_unit, "valor_total_num": v_tot
+                                    })
+            else:
+                # LÓGICA ORIGINAL: Tabelas normais para Bling e System Port
+                tabelas = page.extract_tables()
+                for tabela in tabelas:
+                    for linha in tabela:
+                        l_bruta = [str(celula).strip() if celula else "" for celula in linha]
+                        l = [c for c in l_bruta if c != ""]
+                        if not l: continue
+                        texto_linha = " ".join(l).upper()
 
-                        elif tipo == 'bling':
-                            if len(l) < 7: continue 
-                            cod, desc, unid = l[2], l[1].replace('\n', ' '), l[3]
-                            qtd, v_unit, v_tot = limpar_numero(l[4]), limpar_numero(l[5]), limpar_numero(l[6])
-                            
-                        else: 
-                            if len(l) < 7: continue 
-                            cod, desc, unid = l[1], l[2].replace('\n', ' '), l[3]
-                            qtd, v_unit, v_tot = limpar_numero(l[4]), limpar_numero(l[5]), limpar_numero(l[6])
+                        if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
+                        if "VENCIMENTO" in texto_linha or "TOTAL" in texto_linha or "Nº DE ITENS" in texto_linha: continue
+                        if "IMAGEM" in texto_linha or "AVISTA" in texto_linha or "ÍTEM" in texto_linha: continue
 
-                        if qtd == 0 and v_unit == 0: continue
-                        itens_extraidos.append({"codigo": cod[:100], "descricao": desc[:250], "quantidade": qtd, "unidade": unid[:20], "valor_unitario_num": v_unit, "valor_total_num": v_tot})
-                    except Exception as e:
-                        continue
+                        try:
+                            if tipo == 'bling':
+                                if len(l) < 7: continue 
+                                cod, desc, unid = l[2], l[1].replace('\n', ' '), l[3]
+                                qtd, v_unit, v_tot = limpar_numero(l[4]), limpar_numero(l[5]), limpar_numero(l[6])
+                            else: 
+                                if len(l) < 7: continue 
+                                cod, desc, unid = l[1], l[2].replace('\n', ' '), l[3]
+                                qtd, v_unit, v_tot = limpar_numero(l[4]), limpar_numero(l[5]), limpar_numero(l[6])
+
+                            if qtd == 0 and v_unit == 0: continue
+                            itens_extraidos.append({"codigo": cod[:100], "descricao": desc[:250], "quantidade": qtd, "unidade": unid[:20], "valor_unitario_num": v_unit, "valor_total_num": v_tot})
+                        except Exception as e:
+                            continue
                         
     return itens_extraidos, referencia
 
@@ -230,7 +250,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
     estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
     
-    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
+    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white" style="text-decoration:none;">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
     btn_zap.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
@@ -274,7 +294,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
     estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
     
-    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white">www.minasmateriaiseletricos.com.br</a>'
+    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white" style="text-decoration:none;">www.minasmateriaiseletricos.com.br</a>'
     
     tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
     tabela_rodape.setStyle(TableStyle([
