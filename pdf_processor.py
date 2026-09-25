@@ -12,11 +12,11 @@ def processar_pdfs(pdf_bytes, tipo):
             tabelas = page.extract_tables()
             for tabela in tabelas:
                 for linha in tabela:
-                    # Limpa a linha e transforma tudo em texto
+                    # Limpa a linha e garante que tudo é texto
                     l = [str(celula).strip() if celula else "" for celula in linha]
                     texto_linha = " ".join(l).upper()
 
-                    # Ignora linhas vazias ou cabeçalhos/rodapés que o sistema tenta ler como produto
+                    # Pula lixo (cabeçalhos, rodapés, imagens)
                     if not texto_linha.strip(): continue
                     if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
                     if "VENCIMENTO" in texto_linha or "TOTAL" in texto_linha or "Nº DE ITENS" in texto_linha: continue
@@ -33,30 +33,29 @@ def processar_pdfs(pdf_bytes, tipo):
                             v_unit_str = l[4].replace('R$', '').replace('.', '').replace(',', '.')
                             v_tot_str = l[5].replace('R$', '').replace('.', '').replace(',', '.')
                         
-                        # Extração do System Port (Ajustada conforme o seu log)
+                        # Extração Corrigida do System Port
                         else:
                             if len(l) < 6: continue
-                            cod = l[1] # O log mostrou que o código está aqui
-                            desc = l[2].replace('\n', ' ') # A descrição está aqui
-                            unid = l[3] if len(l) > 3 else "UN"
-                            qtd_str = l[4].replace(',', '.') if len(l) > 4 else "0"
-                            v_unit_str = l[5].replace('R$', '').replace('.', '').replace(',', '.') if len(l) > 5 else "0"
-                            v_tot_str = l[6].replace('R$', '').replace('.', '').replace(',', '.') if len(l) > 6 else v_unit_str
+                            cod = l[1]
+                            desc = l[2].replace('\n', ' ')
+                            unid = "UN" # Forçamos UN pois o layout do System Port junta colunas
+                            qtd_str = l[3].replace(',', '.') if len(l) > 3 else "0"
+                            v_unit_str = l[4].replace('R$', '').replace('.', '').replace(',', '.') if len(l) > 4 else "0"
+                            v_tot_str = l[5].replace('R$', '').replace('.', '').replace(',', '.') if len(l) > 5 else v_unit_str
 
-                        # Converte números com segurança
+                        # Transformação segura para números
                         qtd = float(qtd_str) if qtd_str.replace('.','',1).isdigit() else 0.0
                         v_unit = float(v_unit_str) if v_unit_str.replace('.','',1).isdigit() else 0.0
                         v_tot = float(v_tot_str) if v_tot_str.replace('.','',1).isdigit() else (qtd * v_unit)
 
-                        # Se não tem quantidade nem preço, não é um produto real (filtra sujeiras)
-                        if qtd == 0 and v_unit == 0:
-                            continue
+                        # Se não for peça (preço e qtd zero), descarta
+                        if qtd == 0 and v_unit == 0: continue
 
                         item = {
-                            "codigo": cod[:100], # Trava tamanho para não quebrar o banco
+                            "codigo": cod[:100],
                             "descricao": desc[:250],
                             "quantidade": qtd,
-                            "unidade": unid[:20], # Trava em 20 letras para evitar erro 500
+                            "unidade": unid[:20],
                             "valor_unitario_num": v_unit,
                             "valor_total_num": v_tot
                         }
@@ -72,6 +71,10 @@ def gerar_pdf_unificado(itens):
     elements = []
     styles = getSampleStyleSheet()
     
+    # Criamos um estilo específico para a descrição, para ela quebrar de linha bonitinho
+    estilo_desc = styles['Normal']
+    estilo_desc.fontSize = 8 
+    
     header_text = "<b>MINAS MATERIAIS ELÉTRICOS LTDA</b><br/>CNPJ: 64.705.243/0001-08<br/>Orçamento Consolidado"
     elements.append(Paragraph(header_text, styles['Normal']))
     elements.append(Spacer(1, 20))
@@ -84,9 +87,12 @@ def gerar_pdf_unificado(itens):
         v_tot_str = f"R$ {item.get('valor_total_num', 0):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
         total_geral += float(item.get('valor_total_num', 0))
         
+        # O Paragraph impede que o texto invada outras colunas
+        desc_paragraph = Paragraph(item.get('descricao', ''), estilo_desc)
+        
         dados_tabela.append([
             item.get('codigo', ''),
-            item.get('descricao', ''),
+            desc_paragraph, # Usamos o paragraph aqui no lugar do texto simples
             item.get('unidade', ''),
             str(item.get('quantidade', '')),
             v_unit_str,
@@ -96,7 +102,7 @@ def gerar_pdf_unificado(itens):
     total_formatado = f"R$ {total_geral:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     dados_tabela.append(["", "", "", "", "TOTAL GERAL:", total_formatado])
 
-    t = Table(dados_tabela, colWidths=[60, 250, 40, 40, 70, 75])
+    t = Table(dados_tabela, colWidths=[60, 240, 30, 40, 65, 75])
     t.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#f0f0f0")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.black),
@@ -107,6 +113,7 @@ def gerar_pdf_unificado(itens):
         ('GRID', (0,0), (-1,-2), 1, colors.black),
         ('LINEABOVE', (4,-1), (5,-1), 1, colors.black),
         ('FONTNAME', (4,-1), (5,-1), 'Helvetica-Bold'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), # Alinha os textos ao meio
     ]))
     
     elements.append(t)
