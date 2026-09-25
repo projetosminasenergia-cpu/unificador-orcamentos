@@ -44,11 +44,11 @@
 
                 <div class="row">
                     <div class="col">
-                        <label>Anexar PDF Bling:</label>
+                        <label>Anexar Proposta Minas Materiais:</label>
                         <input type="file" name="pdf_x" accept=".pdf">
                     </div>
                     <div class="col">
-                        <label>Anexar PDF System Port:</label>
+                        <label>Anexar Proposta Minas Painéis:</label>
                         <input type="file" name="pdf_y" accept=".pdf">
                     </div>
                 </div>
@@ -79,7 +79,7 @@
                 <tr>
                     <td><b>{{ "%05d" | format(300 + orc.id) }}</b></td>
                     <td>{{ orc.nome_identificador }}</td>
-                    <td style="font-size:12px; color:#666;">Bling: {{ orc.ref_bling }}<br>MP: {{ orc.ref_sp }}</td>
+                    <td style="font-size:12px; color:#666;">MM: {{ orc.ref_bling }}<br>MP: {{ orc.ref_sp }}</td>
                     <td>{{ orc.data_geracao.strftime('%d/%m/%Y') }}</td>
                     <td><b>R$ {{ "%.2f"|format(orc.valor_total) }}</b></td>
                     <td><a href="/baixar_pdf/{{ orc.id }}" class="btn">Baixar PDF</a></td>
