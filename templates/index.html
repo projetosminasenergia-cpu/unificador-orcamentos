@@ -8,31 +8,42 @@
         .container { max-width: 900px; margin: 0 auto; }
         .header { text-align: center; margin-bottom: 30px; }
         .card { background: white; padding: 25px; border-radius: 10px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        .row { display: flex; gap: 15px; margin-bottom: 15px; }
+        .row { display: flex; gap: 15px; margin-bottom: 20px; }
         .col { flex: 1; }
-        label { font-weight: 600; font-size: 14px; margin-bottom: 5px; display: block; color: #555;}
-        input[type="text"], input[type="file"] { padding: 10px; width: 100%; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
-        button { background: #F2B705; color: #333; font-weight: bold; font-size: 16px; border: none; padding: 12px; width: 100%; border-radius: 5px; cursor: pointer; transition: 0.2s;}
-        button:hover { background: #d9a404; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
+        label { font-weight: 600; font-size: 13px; margin-bottom: 6px; display: block; color: #555;}
+        input[type="text"], input[type="file"], input[type="number"] { padding: 10px; width: 100%; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        
+        .file-wrapper { display: flex; gap: 8px; }
+        .btn-clear { background: #dc3545; color: white; border: none; border-radius: 5px; padding: 0 12px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn-clear:hover { background: #c82333; }
+        
+        .btn-gerar { background: #F2B705; color: #333; font-weight: bold; font-size: 16px; border: none; padding: 14px; width: 100%; border-radius: 5px; cursor: pointer; transition: 0.2s;}
+        .btn-gerar:hover { background: #d9a404; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
         th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; }
         th { background-color: #f8f9fa; font-weight: 600; color: #555; }
-        a.btn { background: #343a40; color: white; padding: 8px 12px; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500;}
+        a.btn { background: #343a40; color: white; padding: 8px 12px; text-decoration: none; border-radius: 4px; font-weight: 500;}
         a.btn:hover { background: #23272b; }
         .search-box { display: flex; gap: 10px; margin-bottom: 20px; }
         .search-box input { flex: 1; }
-        .search-box button { width: auto; padding: 10px 20px; background: #343a40; color: white; }
+        .search-box button { width: auto; padding: 10px 20px; background: #343a40; color: white; border: none; border-radius: 4px; cursor: pointer;}
     </style>
+    <script>
+        function limparArquivo(idInput) {
+            document.getElementById(idInput).value = "";
+        }
+    </script>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h2>Gerenciador de Orçamentos</h2>
-            <p>Minas Materiais & Minas Painéis</p>
+            <p>Minas Materiais, Minas Painéis & Parceiros</p>
         </div>
 
         <div class="card">
-            <h3 style="margin-top:0;">Criar Nova Proposta</h3>
+            <h3 style="margin-top:0; margin-bottom: 20px;">Criar Nova Proposta</h3>
             <form action="/mesclar" method="POST" enctype="multipart/form-data">
                 
                 <div class="row">
@@ -45,15 +56,35 @@
                 <div class="row">
                     <div class="col">
                         <label>Anexar Proposta Minas Materiais:</label>
-                        <input type="file" name="pdf_x" accept=".pdf">
+                        <div class="file-wrapper">
+                            <input type="file" name="pdf_x" id="pdf_x" accept=".pdf">
+                            <button type="button" class="btn-clear" onclick="limparArquivo('pdf_x')" title="Remover anexo">✕</button>
+                        </div>
                     </div>
                     <div class="col">
                         <label>Anexar Proposta Minas Painéis:</label>
-                        <input type="file" name="pdf_y" accept=".pdf">
+                        <div class="file-wrapper">
+                            <input type="file" name="pdf_y" id="pdf_y" accept=".pdf">
+                            <button type="button" class="btn-clear" onclick="limparArquivo('pdf_y')" title="Remover anexo">✕</button>
+                        </div>
                     </div>
                 </div>
 
-                <button type="submit">Mesclar e Gerar PDF Profissional</button>
+                <div class="row" style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px dashed #ccc;">
+                    <div class="col" style="flex: 2;">
+                        <label>Anexar Proposta Universo Elétrico (Terceiro):</label>
+                        <div class="file-wrapper">
+                            <input type="file" name="pdf_z" id="pdf_z" accept=".pdf">
+                            <button type="button" class="btn-clear" onclick="limparArquivo('pdf_z')" title="Remover anexo">✕</button>
+                        </div>
+                    </div>
+                    <div class="col" style="flex: 1;">
+                        <label>Acréscimo Comercial (%):</label>
+                        <input type="number" step="0.01" name="margem_ue" placeholder="Ex: 20" value="0">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-gerar">Mesclar e Gerar PDF Profissional</button>
             </form>
         </div>
 
@@ -79,7 +110,7 @@
                 <tr>
                     <td><b>{{ "%05d" | format(300 + orc.id) }}</b></td>
                     <td>{{ orc.nome_identificador }}</td>
-                    <td style="font-size:12px; color:#666;">MM: {{ orc.ref_bling }}<br>MP: {{ orc.ref_sp }}</td>
+                    <td style="font-size:11px; color:#666;">MM: {{ orc.ref_bling }}<br>MP: {{ orc.ref_sp }}<br>UE: {{ orc.ref_ue }}</td>
                     <td>{{ orc.data_geracao.strftime('%d/%m/%Y') }}</td>
                     <td><b>R$ {{ "%.2f"|format(orc.valor_total) }}</b></td>
                     <td><a href="/baixar_pdf/{{ orc.id }}" class="btn">Baixar PDF</a></td>
