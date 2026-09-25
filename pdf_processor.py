@@ -13,10 +13,20 @@ def limpar_numero(texto):
     t = str(texto).replace('R$', '').strip()
     t = ''.join(c for c in t if c.isdigit() or c in '.,')
     if not t: return 0.0
-    if '.' in t and ',' in t:
+    
+    # Nova inteligência para lidar com números grandes (ex: 1.083,80 ou 1,083,80)
+    if t.count(',') > 1:
+        parts = t.rsplit(',', 1)
+        t = parts[0].replace(',', '') + '.' + parts[1]
+    elif t.count('.') > 1:
+        parts = t.rsplit('.', 1)
+        t = parts[0].replace('.', '') + '.' + parts[1]
+    elif '.' in t and ',' in t:
         if t.rfind(',') > t.rfind('.'): t = t.replace('.', '').replace(',', '.')
         else: t = t.replace(',', '')
-    elif ',' in t: t = t.replace(',', '.')
+    elif ',' in t: 
+        t = t.replace(',', '.')
+        
     try: return float(t)
     except: return 0.0
 
@@ -36,9 +46,9 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
     
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
-            
-            # --- LEITURA DAS REFERÊNCIAS ---
             texto = page.extract_text()
+            
+            # --- 1. LEITURA DAS REFERÊNCIAS ---
             if texto:
                 linhas_texto = [linha.strip() for linha in texto.split('\n') if linha.strip()]
                 for i, linha in enumerate(linhas_texto):
@@ -56,12 +66,14 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                     elif tipo == 'universo_eletrico' and "ORCAMENTO N" in linha.upper():
                         partes = linha.upper().split("ORCAMENTO N")
                         if len(partes) > 1:
-                            # Pega os números antes do [FILIAL...]
                             numeros = ''.join(c for c in partes[1].split('[')[0] if c.isdigit())
                             if numeros: referencia = numeros
 
-            # --- LEITURA DA TABELA ---
-            tabelas = page.extract_tables()
+            # --- 2. LEITURA DA TABELA (COM ESTRATÉGIA PARA TABELAS SEM BORDAS) ---
+            # Se for Universo Elétrico, forçamos o leitor a procurar colunas pelo alinhamento do texto
+            settings = {"vertical_strategy": "text", "horizontal_strategy": "text"} if tipo == 'universo_eletrico' else {}
+            tabelas = page.extract_tables(settings)
+            
             for tabela in tabelas:
                 for linha in tabela:
                     l_bruta = [str(celula).strip() if celula else "" for celula in linha]
@@ -75,33 +87,26 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                     if "DESCRICÃO DO PRODUTO" in texto_linha or "NCM" in texto_linha: continue
 
                     try:
-                        # Extração Universo Elétrico (com margem embutida)
                         if tipo == 'universo_eletrico':
-                            if len(l) < 4: continue
-                            cod = l[0]
-                            desc = l[1].replace('\n', ' ')
+                            if len(l) < 3: continue
+                            cod = l[0].split('\n')[-1].strip() # Limpa índices (ex: "2 \n 80009" vira "80009")
+                            desc = " ".join(l[1:-2]).replace('\n', ' ')
                             unid = "UN"
-                            # Os valores ficam sempre nas 2 últimas colunas
                             v_unit_base = limpar_numero(l[-2])
                             v_tot_base = limpar_numero(l[-1])
                             
                             if v_unit_base == 0: continue
-                            
-                            # Descobre a quantidade verdadeira dividindo o total pelo unitário
                             qtd = round(v_tot_base / v_unit_base, 2)
                             
-                            # Aplica a margem %
                             fator = 1 + (margem / 100.0)
                             v_unit = round(v_unit_base * fator, 2)
                             v_tot = round(qtd * v_unit, 2)
 
-                        # Extração Bling
                         elif tipo == 'bling':
                             if len(l) < 7: continue 
                             cod, desc, unid = l[2], l[1].replace('\n', ' '), l[3]
                             qtd, v_unit, v_tot = limpar_numero(l[4]), limpar_numero(l[5]), limpar_numero(l[6])
                             
-                        # Extração System Port
                         else: 
                             if len(l) < 7: continue 
                             cod, desc, unid = l[1], l[2].replace('\n', ' '), l[3]
@@ -111,6 +116,42 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                         itens_extraidos.append({"codigo": cod[:100], "descricao": desc[:250], "quantidade": qtd, "unidade": unid[:20], "valor_unitario_num": v_unit, "valor_total_num": v_tot})
                     except Exception as e:
                         continue
+            
+            # --- 3. PLANO B DE EMERGÊNCIA PARA A UNIVERSO ELÉTRICO ---
+            # Se a tabela falhar completamente, o sistema "pesca" os produtos linha a linha lendo o texto bruto
+            if tipo == 'universo_eletrico' and not itens_extraidos and texto:
+                linhas_texto = texto.split('\n')
+                for linha in linhas_texto:
+                    parts = linha.strip().split()
+                    if len(parts) >= 4:
+                        v_tot_str = parts[-1]
+                        v_unit_str = parts[-2]
+                        
+                        if ',' in v_tot_str and ',' in v_unit_str:
+                            v_tot_base = limpar_numero(v_tot_str)
+                            v_unit_base = limpar_numero(v_unit_str)
+                            
+                            if v_unit_base > 0 and v_tot_base > 0:
+                                cod = parts[0]
+                                if len(cod) <= 3 and parts[1].isdigit():
+                                    cod = parts[1]
+                                    desc = " ".join(parts[2:-2])
+                                else:
+                                    desc = " ".join(parts[1:-2])
+                                    
+                                unid = "UN"
+                                qtd = round(v_tot_base / v_unit_base, 2)
+                                fator = 1 + (margem / 100.0)
+                                v_unit = round(v_unit_base * fator, 2)
+                                v_tot = round(qtd * v_unit, 2)
+                                
+                                if "DESCRIC" in desc.upper(): continue
+                                
+                                itens_extraidos.append({
+                                    "codigo": cod[:100], "descricao": desc[:250], 
+                                    "quantidade": qtd, "unidade": unid, 
+                                    "valor_unitario_num": v_unit, "valor_total_num": v_tot
+                                })
                         
     return itens_extraidos, referencia
 
@@ -143,7 +184,6 @@ def gerar_pdf_unificado(itens, orcamento_db):
     num_proposta_formatado = f"{300 + orcamento_db.id:05d}"
     data_hoje = orcamento_db.data_geracao.strftime("%d/%m/%Y")
     
-    # Adicionada a referência da Universo Elétrico
     rastreabilidade = f"<font size=8>Ref. MM: {orcamento_db.ref_bling} | Ref. MP: {orcamento_db.ref_sp} | Ref. UE: {orcamento_db.ref_ue}</font>"
 
     dados_proposta = [
@@ -215,7 +255,6 @@ def gerar_pdf_unificado(itens, orcamento_db):
     elements.append(tabela_resumo)
     elements.append(Spacer(1, 20))
 
-    # --- BANNER DE WHATSAPP (COM TEXTO NOVO) ---
     whatsapp_url = "https://wa.me/5531995852164?text=Ol%C3%A1%21%20Tudo%20bem%3F%0A%0ARecebi%20o%20or%C3%A7amento%20e%20gostaria%20de%20tirar%20algumas%20d%C3%BAvidas%20antes%20de%20prosseguir."
     qr_buffer = gerar_qr_code(whatsapp_url)
     img_qr = RLImage(qr_buffer, width=65, height=65)
@@ -224,7 +263,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
     estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
     
-    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
+    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white" style="text-decoration:none;">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
     btn_zap.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
@@ -251,7 +290,6 @@ def gerar_pdf_unificado(itens, orcamento_db):
     except:
         logo_ilustra = Paragraph(" ", estilo_normal)
 
-    # MATEMÁTICA DO ALINHAMENTO: Colunas ajustadas para o Centro Perfeito com o Rodapé!
     tabela_banner = Table([[bloco_esq, bloco_meio, logo_ilustra]], colWidths=[187, 161, 187])
     tabela_banner.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F4F6F9")), 
@@ -265,12 +303,11 @@ def gerar_pdf_unificado(itens, orcamento_db):
     ]))
     elements.append(tabela_banner)
     
-    # --- RODAPÉ ESCURO FINAL ---
     estilo_rodape = ParagraphStyle('Rodape', parent=styles['Normal'], fontSize=8, textColor=colors.white)
     estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
     estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
     
-    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white">www.minasmateriaiseletricos.com.br</a>'
+    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white" style="text-decoration:none;">www.minasmateriaiseletricos.com.br</a>'
     
     tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
     tabela_rodape.setStyle(TableStyle([
