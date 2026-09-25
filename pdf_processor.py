@@ -7,6 +7,27 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER
 
+def limpar_numero(texto):
+    """Remove letras, símbolos de R$ e converte corretamente para decimal."""
+    t = str(texto).replace('R$', '').strip()
+    # Mantém apenas números, pontos e vírgulas
+    t = ''.join(c for c in t if c.isdigit() or c in '.,')
+    if not t: return 0.0
+    
+    # Tratamento para formatos tipo 1.000,50 ou apenas 271,15
+    if '.' in t and ',' in t:
+        if t.rfind(',') > t.rfind('.'):
+            t = t.replace('.', '').replace(',', '.')
+        else:
+            t = t.replace(',', '')
+    elif ',' in t:
+        t = t.replace(',', '.')
+        
+    try:
+        return float(t)
+    except:
+        return 0.0
+
 def processar_pdfs(pdf_bytes, tipo):
     itens_extraidos = []
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -14,36 +35,47 @@ def processar_pdfs(pdf_bytes, tipo):
             tabelas = page.extract_tables()
             for tabela in tabelas:
                 for linha in tabela:
-                    l = [str(celula).strip() if celula else "" for celula in linha]
+                    # Lê a linha bruta
+                    l_bruta = [str(celula).strip() if celula else "" for celula in linha]
+                    
+                    # FILTRO MÁGICO: Remove colunas completamente vazias para evitar o "empurrão" de colunas
+                    l = [c for c in l_bruta if c != ""]
+                    
+                    if not l: continue
                     texto_linha = " ".join(l).upper()
 
-                    if not texto_linha.strip(): continue
+                    # Ignora linhas de cabeçalho, rodapé e informações de frete/vendedor
                     if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
                     if "VENCIMENTO" in texto_linha or "TOTAL" in texto_linha or "Nº DE ITENS" in texto_linha: continue
-                    if "IMAGEM" in texto_linha or "AVISTA" in texto_linha: continue
+                    if "IMAGEM" in texto_linha or "AVISTA" in texto_linha or "ÍTEM" in texto_linha: continue
 
                     try:
+                        # Mapeamento do Bling (Imagem, Descrição, Código, Un, Qtd, V.Un, V.Tot)
                         if tipo == 'bling':
-                            if len(l) < 6: continue
-                            cod = l[0]
+                            if len(l) < 7: continue 
+                            cod = l[2]
                             desc = l[1].replace('\n', ' ')
-                            qtd_str = l[2].replace(',', '.')
                             unid = l[3]
-                            v_unit_str = l[4].replace('R$', '').replace('.', '').replace(',', '.')
-                            v_tot_str = l[5].replace('R$', '').replace('.', '').replace(',', '.')
-                        else:
-                            if len(l) < 6: continue
+                            qtd_str = l[4]
+                            v_unit_str = l[5]
+                            v_tot_str = l[6]
+                            
+                        # Mapeamento do System Port (Item, Código, Descrição, Un, Qtd, V.Un, V.Tot)
+                        else: 
+                            if len(l) < 7: continue 
                             cod = l[1]
                             desc = l[2].replace('\n', ' ')
-                            unid = "UN"
-                            qtd_str = l[3].replace(',', '.') if len(l) > 3 else "0"
-                            v_unit_str = l[4].replace('R$', '').replace('.', '').replace(',', '.') if len(l) > 4 else "0"
-                            v_tot_str = l[5].replace('R$', '').replace('.', '').replace(',', '.') if len(l) > 5 else v_unit_str
+                            unid = l[3]
+                            qtd_str = l[4]
+                            v_unit_str = l[5]
+                            v_tot_str = l[6]
 
-                        qtd = float(qtd_str) if qtd_str.replace('.','',1).isdigit() else 0.0
-                        v_unit = float(v_unit_str) if v_unit_str.replace('.','',1).isdigit() else 0.0
-                        v_tot = float(v_tot_str) if v_tot_str.replace('.','',1).isdigit() else (qtd * v_unit)
+                        # Conversão segura dos números
+                        qtd = limpar_numero(qtd_str)
+                        v_unit = limpar_numero(v_unit_str)
+                        v_tot = limpar_numero(v_tot_str)
 
+                        # Se quantidade e preço zerados, não é um produto
                         if qtd == 0 and v_unit == 0: continue
 
                         item = {
@@ -61,18 +93,16 @@ def processar_pdfs(pdf_bytes, tipo):
 
 def gerar_pdf_unificado(itens):
     buffer = io.BytesIO()
-    # Margens ajustadas para aproveitar melhor o espaço (A4 width = 595. 595 - 30 - 30 = 535)
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elements = []
     styles = getSampleStyleSheet()
     
-    # Estilos de texto personalizados
     estilo_normal = styles['Normal']
     estilo_desc = ParagraphStyle('Descricao', parent=styles['Normal'], fontSize=8, leading=10)
     estilo_direita = ParagraphStyle('Direita', parent=styles['Normal'], alignment=TA_RIGHT, fontSize=9)
     estilo_titulo = ParagraphStyle('Titulo', parent=styles['Heading2'], fontSize=14, spaceAfter=10)
 
-    # --- 1. CABEÇALHO (Logo e Dados da Empresa) ---
+    # --- CABEÇALHO ---
     logo_texto = """<font size="16"><b>MINAS MATERIAIS ELÉTRICOS</b></font><br/><br/>
                     <font size="10">Orçamento Consolidado</font>"""
     
@@ -92,7 +122,7 @@ def gerar_pdf_unificado(itens):
     elements.append(tabela_cabecalho)
     elements.append(Spacer(1, 15))
 
-    # --- 2. DADOS DA PROPOSTA ---
+    # --- DADOS DA PROPOSTA ---
     data_hoje = datetime.now().strftime("%d/%m/%Y")
     info_proposta = f"<b>Data da emissão:</b> {data_hoje}"
     elements.append(Paragraph(info_proposta, estilo_normal))
@@ -100,8 +130,7 @@ def gerar_pdf_unificado(itens):
     
     elements.append(Paragraph("<b>Itens da proposta comercial</b>", estilo_titulo))
 
-    # --- 3. TABELA DE ITENS ---
-    # Cabeçalho da tabela igual ao Bling
+    # --- TABELA DE ITENS ---
     dados_tabela = [["Código", "Descrição do produto/serviço", "Un", "Qtd.", "Preço un.", "Preço total"]]
     
     total_geral = 0.0
@@ -115,10 +144,7 @@ def gerar_pdf_unificado(itens):
         total_geral += float(item.get('valor_total_num', 0))
         soma_qtdes += float(item.get('quantidade', 0))
         
-        # Paragraph para a descrição quebrar de linha sem desalinhar a tabela
         desc_paragraph = Paragraph(item.get('descricao', ''), estilo_desc)
-        
-        # Formatação de quantidade para remover o .0 se for inteiro
         qtd_formatada = f"{item.get('quantidade', 0):.2f}".rstrip('0').rstrip('.') if item.get('quantidade', 0) % 1 != 0 else str(int(item.get('quantidade', 0)))
 
         dados_tabela.append([
@@ -130,24 +156,23 @@ def gerar_pdf_unificado(itens):
             v_tot_str
         ])
 
-    # Construção da tabela de itens
     tabela_itens = Table(dados_tabela, colWidths=[60, 245, 30, 40, 75, 85])
     tabela_itens.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#f0f0f0")), # Cinza claro no cabeçalho
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#f0f0f0")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.black),
         ('ALIGN', (0,0), (-1,0), 'LEFT'),
-        ('ALIGN', (2,0), (-1,-1), 'CENTER'), # Un, Qtd e Valores centralizados
+        ('ALIGN', (2,0), (-1,-1), 'CENTER'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('BOTTOMPADDING', (0,0), (-1,0), 8),
         ('TOPPADDING', (0,0), (-1,0), 8),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey), # Bordas finas cinzas
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
     ]))
     
     elements.append(tabela_itens)
     elements.append(Spacer(1, 20))
 
-    # --- 4. TABELA DE RESUMO (Fiel ao modelo) ---
+    # --- TABELA DE RESUMO ---
     total_formatado = f"R$ {total_geral:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     soma_qtdes_formatada = f"{soma_qtdes:.2f}".rstrip('0').rstrip('.') if soma_qtdes % 1 != 0 else str(int(soma_qtdes))
     
@@ -161,23 +186,21 @@ def gerar_pdf_unificado(itens):
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#f0f0f0")),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTNAME', (2,1), (2,1), 'Helvetica-Bold'), # Total em negrito
+        ('FONTNAME', (2,1), (2,1), 'Helvetica-Bold'), 
         ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
         ('BOTTOMPADDING', (0,0), (-1,-1), 8),
         ('TOPPADDING', (0,0), (-1,-1), 8),
     ]))
     
-    # Alinhando a tabela de resumo à direita
     tabela_resumo.hAlign = 'RIGHT'
     elements.append(tabela_resumo)
     elements.append(Spacer(1, 40))
 
-    # --- 5. RODAPÉ DE ASSINATURA ---
+    # --- RODAPÉ ---
     elements.append(Paragraph("Atenciosamente,", estilo_normal))
     elements.append(Spacer(1, 5))
     elements.append(Paragraph("<b>Departamento de vendas</b>", estilo_normal))
 
-    # Gera o arquivo
     doc.build(elements)
     buffer.seek(0)
     return buffer
