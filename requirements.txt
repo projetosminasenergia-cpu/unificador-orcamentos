@@ -5,4 +5,4 @@ Werkzeug==3.0.1
 Flask-SQLAlchemy==3.1.1
 psycopg[binary]
 gunicorn==21.2.0
-Pillow==10.2.0
+Pillow
