@@ -71,6 +71,7 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                             numeros = ''.join(c for c in partes[1].split('[')[0] if c.isdigit())
                             if numeros: referencia = numeros
 
+            # --- UNIVERSO ELÉTRICO (Texto Corrido) ---
             if tipo == 'universo_eletrico':
                 if texto:
                     linhas_texto = texto.split('\n')
@@ -107,6 +108,8 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                                         "quantidade": qtd, "unidade": unid, 
                                         "valor_unitario_num": v_unit, "valor_total_num": v_tot
                                     })
+            
+            # --- BLING & SYSTEM PORT (Tabelas c/ Leitura Traseira) ---
             else:
                 tabelas = page.extract_tables()
                 for tabela in tabelas:
@@ -114,12 +117,11 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                     for linha in tabela:
                         if not linha: continue
                         
-                        # Preserva as colunas separadas para não misturar código com descrição
-                        l_bruta = [str(celula).strip() if celula else "" for celula in linha]
-                        l = [c for c in l_bruta if c != ""]
+                        # Limpa colunas invisíveis/vazias da tabela
+                        l = [str(celula).strip() for celula in linha if celula and str(celula).strip() != ""]
                         if not l: continue
                         
-                        texto_linha = " ".join(l).upper().replace('\n', ' ')
+                        texto_linha = " ".join(l).upper()
 
                         if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
                         if "VENCIMENTO" in texto_linha or "TOTAL" in texto_linha or "Nº DE ITENS" in texto_linha: continue
@@ -128,34 +130,43 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                         try:
                             if len(l) < 5: continue
                             
+                            # Apanha as últimas 4 colunas (Unid, Qtd, V.Unit, V.Total)
                             unid = l[-4][:20]
-                            # Escudo anti-lixo: se a unidade não for letra (ex: "0,00"), pula a linha
-                            if not any(c.isalpha() for c in unid): continue
+                            if not any(c.isalpha() for c in unid): continue # Ignora lixo
                             
-                            qtd, v_unit, v_tot = limpar_numero(l[-3]), limpar_numero(l[-2]), limpar_numero(l[-1])
+                            qtd = limpar_numero(l[-3])
+                            v_unit = limpar_numero(l[-2])
+                            v_tot = limpar_numero(l[-1])
+                            
                             if qtd == 0 and v_unit == 0: continue
                             
+                            cod = "N/A"
+                            desc = ""
+                            
                             if tipo == 'bling':
-                                if len(l) >= 6:
+                                if len(l) >= 7: # Tabela Perfeita
                                     cod = l[-5]
+                                    desc = l[-6].replace('\n', ' ')
+                                elif len(l) == 6: # Tabela Colada (Código e Descrição juntos)
+                                    cod = "N/A"
                                     desc = l[1].replace('\n', ' ')
                                 else:
-                                    cod = "N/A"
-                                    desc = l[1].replace('\n', ' ') if len(l) > 1 else ""
+                                    desc = " ".join(l[:-4]).replace('\n', ' ')
                                     
                             elif tipo == 'system_port':
-                                if len(l) >= 7:
+                                if len(l) >= 7: # Tabela Perfeita
                                     cod = l[1]
                                     desc = l[2].replace('\n', ' ')
-                                else:
-                                    # Proteção caso a descrição esbarre no código (ex: DPS)
+                                elif len(l) == 6: # Tabela Colada
                                     partes_desc = l[1].split()
-                                    if len(partes_desc) > 1 and partes_desc[0].isdigit():
+                                    if partes_desc and partes_desc[0].isdigit():
                                         cod = partes_desc[0]
                                         desc = " ".join(partes_desc[1:]).replace('\n', ' ')
                                     else:
-                                        cod = l[1] if len(l) > 1 else "N/A"
-                                        desc = l[1].replace('\n', ' ') if len(l) > 1 else ""
+                                        cod = l[1]
+                                        desc = l[1].replace('\n', ' ')
+                                else:
+                                    desc = " ".join(l[:-4]).replace('\n', ' ')
 
                             itens_extraidos.append({"codigo": cod[:100], "descricao": desc[:250], "quantidade": qtd, "unidade": unid, "valor_unitario_num": v_unit, "valor_total_num": v_tot})
                         except Exception as e:
@@ -274,7 +285,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
     estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
     
-    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
+    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white" style="text-decoration:none;">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
     btn_zap.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
@@ -318,7 +329,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
     estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
     
-    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white">www.minasmateriaiseletricos.com.br</a>'
+    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white" style="text-decoration:none;">www.minasmateriaiseletricos.com.br</a>'
     
     tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
     tabela_rodape.setStyle(TableStyle([
