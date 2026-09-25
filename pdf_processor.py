@@ -9,6 +9,11 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
+# Escudo Protetor contra símbolos que quebram o PDF (&, <, >)
+def safe_xml(texto):
+    if not texto: return ""
+    return str(texto).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 def limpar_numero(texto):
     t = str(texto).replace('R$', '').strip()
     t = ''.join(c for c in t if c.isdigit() or c in '.,')
@@ -47,7 +52,6 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
         for page in pdf.pages:
             texto = page.extract_text()
             
-            # --- 1. LEITURA DAS REFERÊNCIAS ---
             if texto:
                 linhas_texto = [linha.strip() for linha in texto.split('\n') if linha.strip()]
                 for i, linha in enumerate(linhas_texto):
@@ -68,7 +72,6 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                             numeros = ''.join(c for c in partes[1].split('[')[0] if c.isdigit())
                             if numeros: referencia = numeros
 
-            # --- 2. EXTRAÇÃO DOS PRODUTOS ---
             if tipo == 'universo_eletrico':
                 if texto:
                     linhas_texto = texto.split('\n')
@@ -108,7 +111,9 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
             else:
                 tabelas = page.extract_tables()
                 for tabela in tabelas:
+                    if not tabela: continue
                     for linha in tabela:
+                        if not linha: continue
                         l_bruta = [str(celula).strip() if celula else "" for celula in linha]
                         l = [c for c in l_bruta if c != ""]
                         if not l: continue
@@ -119,17 +124,33 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                         if "IMAGEM" in texto_linha or "AVISTA" in texto_linha or "ÍTEM" in texto_linha: continue
 
                         try:
+                            # NOVA LÓGICA: Contagem de trás para a frente (Infalível contra nomes gigantes)
                             if tipo == 'bling':
-                                if len(l) < 7: continue 
-                                cod, desc, unid = l[2], l[1].replace('\n', ' '), l[3]
-                                qtd, v_unit, v_tot = limpar_numero(l[4]), limpar_numero(l[5]), limpar_numero(l[6])
-                            else: 
-                                if len(l) < 7: continue 
-                                cod, desc, unid = l[1], l[2].replace('\n', ' '), l[3]
-                                qtd, v_unit, v_tot = limpar_numero(l[4]), limpar_numero(l[5]), limpar_numero(l[6])
+                                if len(l) < 6: continue
+                                unid = l[-4][:20]
+                                qtd, v_unit, v_tot = limpar_numero(l[-3]), limpar_numero(l[-2]), limpar_numero(l[-1])
+                                
+                                if len(l) >= 7:
+                                    cod = l[-5]
+                                    desc = " ".join(l[1:-5]).replace('\n', ' ')
+                                else:
+                                    cod = "N/A"
+                                    desc = " ".join(l[1:-4]).replace('\n', ' ')
+                                    
+                            elif tipo == 'system_port': 
+                                if len(l) < 6: continue
+                                unid = l[-4][:20]
+                                qtd, v_unit, v_tot = limpar_numero(l[-3]), limpar_numero(l[-2]), limpar_numero(l[-1])
+                                
+                                if len(l) >= 7:
+                                    cod = l[1]
+                                    desc = " ".join(l[2:-4]).replace('\n', ' ')
+                                else:
+                                    cod = l[0]
+                                    desc = " ".join(l[1:-4]).replace('\n', ' ')
 
                             if qtd == 0 and v_unit == 0: continue
-                            itens_extraidos.append({"codigo": cod[:100], "descricao": desc[:250], "quantidade": qtd, "unidade": unid[:20], "valor_unitario_num": v_unit, "valor_total_num": v_tot})
+                            itens_extraidos.append({"codigo": cod[:100], "descricao": desc[:250], "quantidade": qtd, "unidade": unid, "valor_unitario_num": v_unit, "valor_total_num": v_tot})
                         except Exception as e:
                             continue
                         
@@ -164,11 +185,12 @@ def gerar_pdf_unificado(itens, orcamento_db):
     num_proposta_formatado = f"{300 + orcamento_db.id:05d}"
     data_hoje = orcamento_db.data_geracao.strftime("%d/%m/%Y")
     
-    rastreabilidade = f"<font size=8>Ref. MM: {orcamento_db.ref_bling} | Ref. MP: {orcamento_db.ref_sp} | Ref. UE: {orcamento_db.ref_ue}</font>"
+    rastreabilidade = f"<font size=8>Ref. MM: {safe_xml(orcamento_db.ref_bling)} | Ref. MP: {safe_xml(orcamento_db.ref_sp)} | Ref. UE: {safe_xml(orcamento_db.ref_ue)}</font>"
 
+    nome_safe = safe_xml(orcamento_db.nome_identificador)
     dados_proposta = [
         [Paragraph(f"PROPOSTA COMERCIAL Nº {num_proposta_formatado}", estilo_centro_bold)],
-        [Paragraph(f"<b>Projeto/Cliente:</b> {orcamento_db.nome_identificador}<br/><b>Data:</b> {data_hoje}<br/>{rastreabilidade}", estilo_normal)]
+        [Paragraph(f"<b>Projeto/Cliente:</b> {nome_safe}<br/><b>Data:</b> {data_hoje}<br/>{rastreabilidade}", estilo_normal)]
     ]
     
     tabela_identificacao = Table(dados_proposta, colWidths=[535])
@@ -192,10 +214,12 @@ def gerar_pdf_unificado(itens, orcamento_db):
         total_geral += float(item.get('valor_total_num', 0))
         soma_qtdes += float(item.get('quantidade', 0))
         
-        desc_paragraph = Paragraph(item.get('descricao', ''), estilo_desc)
+        desc_safe = safe_xml(item.get('descricao', ''))
+        desc_paragraph = Paragraph(desc_safe, estilo_desc)
+        
         qtd_formatada = f"{item.get('quantidade', 0):.2f}".rstrip('0').rstrip('.') if item.get('quantidade', 0) % 1 != 0 else str(int(item.get('quantidade', 0)))
 
-        dados_tabela.append([item.get('codigo', ''), desc_paragraph, item.get('unidade', ''), qtd_formatada, v_unit_str, v_tot_str])
+        dados_tabela.append([safe_xml(item.get('codigo', '')), desc_paragraph, safe_xml(item.get('unidade', '')), qtd_formatada, v_unit_str, v_tot_str])
 
     tabela_itens = Table(dados_tabela, colWidths=[60, 245, 30, 40, 75, 85])
     tabela_itens.setStyle(TableStyle([
@@ -243,7 +267,6 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
     estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
     
-    # Olha que maravilha, nada de style="text-decoration:none;" aqui:
     btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
     btn_zap.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
@@ -288,7 +311,6 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
     estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
     
-    # E nada de style aqui também:
     link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white">www.minasmateriaiseletricos.com.br</a>'
     
     tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
