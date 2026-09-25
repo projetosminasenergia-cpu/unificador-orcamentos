@@ -30,13 +30,14 @@ def gerar_qr_code(link):
     buffer.seek(0)
     return buffer
 
-def processar_pdfs(pdf_bytes, tipo):
+def processar_pdfs(pdf_bytes, tipo, margem=0.0):
     itens_extraidos = []
     referencia = "N/A"
     
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
             
+            # --- LEITURA DAS REFERÊNCIAS ---
             texto = page.extract_text()
             if texto:
                 linhas_texto = [linha.strip() for linha in texto.split('\n') if linha.strip()]
@@ -51,7 +52,15 @@ def processar_pdfs(pdf_bytes, tipo):
                             if len(possivel_ref) >= 4:
                                 referencia = possivel_ref
                                 break
+                                
+                    elif tipo == 'universo_eletrico' and "ORCAMENTO N" in linha.upper():
+                        partes = linha.upper().split("ORCAMENTO N")
+                        if len(partes) > 1:
+                            # Pega os números antes do [FILIAL...]
+                            numeros = ''.join(c for c in partes[1].split('[')[0] if c.isdigit())
+                            if numeros: referencia = numeros
 
+            # --- LEITURA DA TABELA ---
             tabelas = page.extract_tables()
             for tabela in tabelas:
                 for linha in tabela:
@@ -63,18 +72,42 @@ def processar_pdfs(pdf_bytes, tipo):
                     if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
                     if "VENCIMENTO" in texto_linha or "TOTAL" in texto_linha or "Nº DE ITENS" in texto_linha: continue
                     if "IMAGEM" in texto_linha or "AVISTA" in texto_linha or "ÍTEM" in texto_linha: continue
+                    if "DESCRICÃO DO PRODUTO" in texto_linha or "NCM" in texto_linha: continue
 
                     try:
-                        if tipo == 'bling':
+                        # Extração Universo Elétrico (com margem embutida)
+                        if tipo == 'universo_eletrico':
+                            if len(l) < 4: continue
+                            cod = l[0]
+                            desc = l[1].replace('\n', ' ')
+                            unid = "UN"
+                            # Os valores ficam sempre nas 2 últimas colunas
+                            v_unit_base = limpar_numero(l[-2])
+                            v_tot_base = limpar_numero(l[-1])
+                            
+                            if v_unit_base == 0: continue
+                            
+                            # Descobre a quantidade verdadeira dividindo o total pelo unitário
+                            qtd = round(v_tot_base / v_unit_base, 2)
+                            
+                            # Aplica a margem %
+                            fator = 1 + (margem / 100.0)
+                            v_unit = round(v_unit_base * fator, 2)
+                            v_tot = round(qtd * v_unit, 2)
+
+                        # Extração Bling
+                        elif tipo == 'bling':
                             if len(l) < 7: continue 
-                            cod, desc, unid, qtd_str, v_unit_str, v_tot_str = l[2], l[1].replace('\n', ' '), l[3], l[4], l[5], l[6]
+                            cod, desc, unid = l[2], l[1].replace('\n', ' '), l[3]
+                            qtd, v_unit, v_tot = limpar_numero(l[4]), limpar_numero(l[5]), limpar_numero(l[6])
+                            
+                        # Extração System Port
                         else: 
                             if len(l) < 7: continue 
-                            cod, desc, unid, qtd_str, v_unit_str, v_tot_str = l[1], l[2].replace('\n', ' '), l[3], l[4], l[5], l[6]
+                            cod, desc, unid = l[1], l[2].replace('\n', ' '), l[3]
+                            qtd, v_unit, v_tot = limpar_numero(l[4]), limpar_numero(l[5]), limpar_numero(l[6])
 
-                        qtd, v_unit, v_tot = limpar_numero(qtd_str), limpar_numero(v_unit_str), limpar_numero(v_tot_str)
                         if qtd == 0 and v_unit == 0: continue
-
                         itens_extraidos.append({"codigo": cod[:100], "descricao": desc[:250], "quantidade": qtd, "unidade": unid[:20], "valor_unitario_num": v_unit, "valor_total_num": v_tot})
                     except Exception as e:
                         continue
@@ -109,17 +142,18 @@ def gerar_pdf_unificado(itens, orcamento_db):
 
     num_proposta_formatado = f"{300 + orcamento_db.id:05d}"
     data_hoje = orcamento_db.data_geracao.strftime("%d/%m/%Y")
-    rastreabilidade = f"<font size=8>Ref. MM: {orcamento_db.ref_bling} | Ref. MP: {orcamento_db.ref_sp}</font>"
+    
+    # Adicionada a referência da Universo Elétrico
+    rastreabilidade = f"<font size=8>Ref. MM: {orcamento_db.ref_bling} | Ref. MP: {orcamento_db.ref_sp} | Ref. UE: {orcamento_db.ref_ue}</font>"
 
     dados_proposta = [
         [Paragraph(f"PROPOSTA COMERCIAL Nº {num_proposta_formatado}", estilo_centro_bold)],
         [Paragraph(f"<b>Projeto/Cliente:</b> {orcamento_db.nome_identificador}<br/><b>Data:</b> {data_hoje}<br/>{rastreabilidade}", estilo_normal)]
     ]
     
-    cor_marca = colors.HexColor("#F2B705") 
     tabela_identificacao = Table(dados_proposta, colWidths=[535])
     tabela_identificacao.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), cor_marca),
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#F2B705")),
         ('BACKGROUND', (0,1), (-1,1), colors.HexColor("#F9F9F9")),
         ('BOX', (0,0), (-1,-1), 1, colors.HexColor("#DDDDDD")),
         ('BOTTOMPADDING', (0,0), (-1,1), 8),
@@ -131,7 +165,6 @@ def gerar_pdf_unificado(itens, orcamento_db):
     dados_tabela = [["Código", "Descrição do produto", "Un", "Qtd", "V. Unitário", "V. Total"]]
     total_geral = 0.0
     soma_qtdes = 0.0
-    num_itens = len(itens)
     
     for item in itens:
         v_unit_str = f"R$ {item.get('valor_unitario_num', 0):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
@@ -164,7 +197,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     
     dados_resumo = [
         ["N° de Itens", "Soma das Qtdes", "TOTAL DA PROPOSTA"],
-        [str(num_itens), soma_qtdes_formatada, total_formatado]
+        [str(len(itens)), soma_qtdes_formatada, total_formatado]
     ]
     
     tabela_resumo = Table(dados_resumo, colWidths=[100, 100, 140])
@@ -182,8 +215,8 @@ def gerar_pdf_unificado(itens, orcamento_db):
     elements.append(tabela_resumo)
     elements.append(Spacer(1, 20))
 
-    # --- BANNER DE WHATSAPP ---
-    whatsapp_url = "https://wa.me/5531995852164?text=GOSTARIA%20DE%20TIRAR%20UMA%20DUVIDA%20REFERENTE%20AO%20MEU%20OR%C3%87AMENTO"
+    # --- BANNER DE WHATSAPP (COM TEXTO NOVO) ---
+    whatsapp_url = "https://wa.me/5531995852164?text=Ol%C3%A1%21%20Tudo%20bem%3F%0A%0ARecebi%20o%20or%C3%A7amento%20e%20gostaria%20de%20tirar%20algumas%20d%C3%BAvidas%20antes%20de%20prosseguir."
     qr_buffer = gerar_qr_code(whatsapp_url)
     img_qr = RLImage(qr_buffer, width=65, height=65)
 
@@ -191,7 +224,6 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
     estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
     
-    # Aqui removemos o maldito 'style' que causou o erro 500
     btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
     btn_zap.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
@@ -219,7 +251,8 @@ def gerar_pdf_unificado(itens, orcamento_db):
     except:
         logo_ilustra = Paragraph(" ", estilo_normal)
 
-    tabela_banner = Table([[bloco_esq, bloco_meio, logo_ilustra]], colWidths=[230, 160, 145])
+    # MATEMÁTICA DO ALINHAMENTO: Colunas ajustadas para o Centro Perfeito com o Rodapé!
+    tabela_banner = Table([[bloco_esq, bloco_meio, logo_ilustra]], colWidths=[187, 161, 187])
     tabela_banner.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F4F6F9")), 
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -227,8 +260,8 @@ def gerar_pdf_unificado(itens, orcamento_db):
         ('ALIGN', (2,0), (2,0), 'RIGHT'),
         ('BOTTOMPADDING', (0,0), (-1,-1), 12),
         ('TOPPADDING', (0,0), (-1,-1), 12),
-        ('LEFTPADDING', (0,0), (-1,-1), 15),
-        ('RIGHTPADDING', (0,0), (-1,-1), 15),
+        ('LEFTPADDING', (0,0), (0,0), 15),
+        ('RIGHTPADDING', (2,0), (2,0), 15),
     ]))
     elements.append(tabela_banner)
     
@@ -237,7 +270,6 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
     estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
     
-    # E removemos o estilo do site também!
     link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white">www.minasmateriaiseletricos.com.br</a>'
     
     tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
