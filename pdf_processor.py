@@ -50,128 +50,154 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
             texto = page.extract_text()
+            if not texto: continue
             
-            if texto:
-                linhas_texto = [linha.strip() for linha in texto.split('\n') if linha.strip()]
-                for i, linha in enumerate(linhas_texto):
-                    if tipo == 'bling' and "PROPOSTA N" in linha.upper():
-                        numeros = ''.join(c for c in linha if c.isdigit())
+            linhas_texto = [linha.strip() for linha in texto.split('\n') if linha.strip()]
+            
+            for i, linha in enumerate(linhas_texto):
+                if tipo == 'bling' and "PROPOSTA N" in linha.upper():
+                    numeros = ''.join(c for c in linha if c.isdigit())
+                    if numeros: referencia = numeros
+                elif tipo == 'system_port' and "ORÇAMENTO SIMPLES" in linha.upper():
+                    for prox_linha in linhas_texto[i+1:i+4]:
+                        possivel_ref = ''.join(c for c in prox_linha if c.isdigit())
+                        if len(possivel_ref) >= 4:
+                            referencia = possivel_ref
+                            break
+                elif tipo == 'universo_eletrico' and "ORCAMENTO N" in linha.upper():
+                    partes = linha.upper().split("ORCAMENTO N")
+                    if len(partes) > 1:
+                        numeros = ''.join(c for c in partes[1].split('[')[0] if c.isdigit())
                         if numeros: referencia = numeros
-                    
-                    elif tipo == 'system_port' and "ORÇAMENTO SIMPLES" in linha.upper():
-                        for prox_linha in linhas_texto[i+1:i+4]:
-                            possivel_ref = ''.join(c for c in prox_linha if c.isdigit())
-                            if len(possivel_ref) >= 4:
-                                referencia = possivel_ref
-                                break
-                                
-                    elif tipo == 'universo_eletrico' and "ORCAMENTO N" in linha.upper():
-                        partes = linha.upper().split("ORCAMENTO N")
-                        if len(partes) > 1:
-                            numeros = ''.join(c for c in partes[1].split('[')[0] if c.isdigit())
-                            if numeros: referencia = numeros
 
-            # --- UNIVERSO ELÉTRICO (Texto Corrido) ---
-            if tipo == 'universo_eletrico':
-                if texto:
-                    linhas_texto = texto.split('\n')
-                    for linha in linhas_texto:
-                        parts = linha.strip().split()
-                        if len(parts) >= 4:
-                            v_tot_str = parts[-1]
-                            v_unit_str = parts[-2]
-                            
-                            if (',' in v_tot_str or '.' in v_tot_str) and (',' in v_unit_str or '.' in v_unit_str):
-                                v_tot_base = limpar_numero(v_tot_str)
-                                v_unit_base = limpar_numero(v_unit_str)
+            # --- O NOVO RADAR 3.0 (À PROVA DE FALHAS) ---
+            buffer_desc = ""
+            for linha in linhas_texto:
+                parts = linha.split()
+                if not parts: continue
+
+                # Lógica Universo Elétrico
+                if tipo == 'universo_eletrico':
+                    if len(parts) >= 4:
+                        v_tot_str = parts[-1]
+                        v_unit_str = parts[-2]
+                        if (',' in v_tot_str or '.' in v_tot_str) and (',' in v_unit_str or '.' in v_unit_str):
+                            v_tot_base = limpar_numero(v_tot_str)
+                            v_unit_base = limpar_numero(v_unit_str)
+                            if v_unit_base > 0 and v_tot_base > 0:
+                                cod = parts[0]
+                                if len(cod) <= 3 and parts[1].isdigit():
+                                    cod = parts[1]
+                                    desc = " ".join(parts[2:-2])
+                                else:
+                                    desc = " ".join(parts[1:-2])
+                                    
+                                if "DESCRIC" in desc.upper() or "TOTAL" in desc.upper(): 
+                                    buffer_desc = ""
+                                    continue
+                                if cod.isalpha(): 
+                                    buffer_desc = ""
+                                    continue
                                 
-                                if v_unit_base > 0 and v_tot_base > 0:
-                                    cod = parts[0]
-                                    if len(cod) <= 3 and parts[1].isdigit():
-                                        cod = parts[1]
-                                        desc = " ".join(parts[2:-2])
+                                unid = "UN"
+                                qtd = round(v_tot_base / v_unit_base, 2)
+                                fator = 1 + (margem / 100.0)
+                                v_unit = round(v_unit_base * fator, 2)
+                                v_tot = round(qtd * v_unit, 2)
+                                
+                                if buffer_desc:
+                                    desc = buffer_desc + " " + desc
+                                    buffer_desc = ""
+                                    
+                                parts_desc = desc.split()
+                                if parts_desc and parts_desc[0].isdigit() and len(parts_desc[0]) <= 3:
+                                    desc = " ".join(parts_desc[1:])
+                                    
+                                itens_extraidos.append({
+                                    "codigo": cod[:100], "descricao": desc[:250], 
+                                    "quantidade": qtd, "unidade": unid, 
+                                    "valor_unitario_num": v_unit, "valor_total_num": v_tot
+                                })
+                                continue
+
+                # Lógica Bling e System Port (Não perde o DPS!)
+                elif tipo in ['bling', 'system_port']:
+                    if len(parts) >= 4:
+                        unid_str = parts[-4][:20]
+                        qtd_str = parts[-3]
+                        v_unit_str = parts[-2]
+                        v_tot_str = parts[-1]
+                        
+                        is_unid = any(c.isalpha() for c in unid_str) and len(unid_str) <= 5
+                        has_comma_or_dot = (',' in v_tot_str or '.' in v_tot_str)
+                        
+                        if is_unid and has_comma_or_dot:
+                            qtd = limpar_numero(qtd_str)
+                            v_unit = limpar_numero(v_unit_str)
+                            v_tot = limpar_numero(v_tot_str)
+                            
+                            if qtd > 0 and (v_unit > 0 or v_tot > 0):
+                                leftover = parts[:-4]
+                                cod = "N/A"
+                                desc = ""
+                                
+                                if tipo == 'bling':
+                                    if len(leftover) == 0:
+                                        cod = "N/A"
+                                    elif len(leftover) == 1:
+                                        cod = leftover[0]
                                     else:
-                                        desc = " ".join(parts[1:-2])
+                                        cod = leftover[-1]
+                                        start_idx = 1 if leftover[0].isdigit() else 0
+                                        desc = " ".join(leftover[start_idx:-1])
                                         
-                                    if "DESCRIC" in desc.upper() or "TOTAL" in desc.upper(): continue
-                                    if cod.isalpha(): continue
+                                elif tipo == 'system_port':
+                                    if len(leftover) == 0:
+                                        cod = "N/A"
+                                    elif len(leftover) == 1:
+                                        cod = leftover[0]
+                                    elif len(leftover) >= 2:
+                                        start_idx = 0
+                                        if leftover[0].isdigit() and len(leftover[0]) <= 4:
+                                            cod = leftover[1]
+                                            start_idx = 2
+                                        else:
+                                            cod = leftover[0]
+                                            start_idx = 1
+                                        desc = " ".join(leftover[start_idx:])
+                                        
+                                if buffer_desc:
+                                    desc = buffer_desc + " " + desc
+                                    buffer_desc = ""
                                     
-                                    unid = "UN"
-                                    qtd = round(v_tot_base / v_unit_base, 2)
+                                desc = desc.strip()
+                                
+                                parts_desc = desc.split()
+                                if parts_desc and parts_desc[0].isdigit() and len(parts_desc[0]) <= 3:
+                                    desc = " ".join(parts_desc[1:])
+                                
+                                if "DESCRIC" in desc.upper() or "TOTAL" in desc.upper() or "SOMA DAS" in desc.upper():
+                                    buffer_desc = ""
+                                    continue
                                     
-                                    fator = 1 + (margem / 100.0)
-                                    v_unit = round(v_unit_base * fator, 2)
-                                    v_tot = round(qtd * v_unit, 2)
-                                    
-                                    itens_extraidos.append({
-                                        "codigo": cod[:100], "descricao": desc[:250], 
-                                        "quantidade": qtd, "unidade": unid, 
-                                        "valor_unitario_num": v_unit, "valor_total_num": v_tot
-                                    })
-            
-            # --- BLING & SYSTEM PORT (Tabelas c/ Leitura Traseira) ---
-            else:
-                tabelas = page.extract_tables()
-                for tabela in tabelas:
-                    if not tabela: continue
-                    for linha in tabela:
-                        if not linha: continue
-                        
-                        # Limpa colunas invisíveis/vazias da tabela
-                        l = [str(celula).strip() for celula in linha if celula and str(celula).strip() != ""]
-                        if not l: continue
-                        
-                        texto_linha = " ".join(l).upper()
+                                itens_extraidos.append({
+                                    "codigo": cod[:100], "descricao": desc[:250], 
+                                    "quantidade": qtd, "unidade": unid_str, 
+                                    "valor_unitario_num": v_unit, "valor_total_num": v_tot
+                                })
+                                continue
 
-                        if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
-                        if "VENCIMENTO" in texto_linha or "TOTAL" in texto_linha or "Nº DE ITENS" in texto_linha: continue
-                        if "IMAGEM" in texto_linha or "AVISTA" in texto_linha or "ÍTEM" in texto_linha: continue
+                # Guarda descrições que foram partidas noutra linha (Salva o DPS)
+                texto_linha = linha.upper()
+                skip_words = ["CÓDIGO", "DESCRIÇÃO", "SOMA DAS", "TOTAL", "ITENS", "IMAGEM", "PROPOSTA", "CLIENTE", "DATA", "CNPJ", "OBSERVAÇÕES", "PAGAMENTO", "VENCIMENTO", "VALOR", "TELEFONE", "MINAS MATERIAIS", "FRETE", "DESCONTO"]
+                if not any(sw in texto_linha for sw in skip_words) and len(linha) > 3:
+                    if buffer_desc:
+                        buffer_desc += " " + linha
+                    else:
+                        buffer_desc = linha
+                else:
+                    buffer_desc = ""
 
-                        try:
-                            if len(l) < 5: continue
-                            
-                            # Apanha as últimas 4 colunas (Unid, Qtd, V.Unit, V.Total)
-                            unid = l[-4][:20]
-                            if not any(c.isalpha() for c in unid): continue # Ignora lixo
-                            
-                            qtd = limpar_numero(l[-3])
-                            v_unit = limpar_numero(l[-2])
-                            v_tot = limpar_numero(l[-1])
-                            
-                            if qtd == 0 and v_unit == 0: continue
-                            
-                            cod = "N/A"
-                            desc = ""
-                            
-                            if tipo == 'bling':
-                                if len(l) >= 7: # Tabela Perfeita
-                                    cod = l[-5]
-                                    desc = l[-6].replace('\n', ' ')
-                                elif len(l) == 6: # Tabela Colada (Código e Descrição juntos)
-                                    cod = "N/A"
-                                    desc = l[1].replace('\n', ' ')
-                                else:
-                                    desc = " ".join(l[:-4]).replace('\n', ' ')
-                                    
-                            elif tipo == 'system_port':
-                                if len(l) >= 7: # Tabela Perfeita
-                                    cod = l[1]
-                                    desc = l[2].replace('\n', ' ')
-                                elif len(l) == 6: # Tabela Colada
-                                    partes_desc = l[1].split()
-                                    if partes_desc and partes_desc[0].isdigit():
-                                        cod = partes_desc[0]
-                                        desc = " ".join(partes_desc[1:]).replace('\n', ' ')
-                                    else:
-                                        cod = l[1]
-                                        desc = l[1].replace('\n', ' ')
-                                else:
-                                    desc = " ".join(l[:-4]).replace('\n', ' ')
-
-                            itens_extraidos.append({"codigo": cod[:100], "descricao": desc[:250], "quantidade": qtd, "unidade": unid, "valor_unitario_num": v_unit, "valor_total_num": v_tot})
-                        except Exception as e:
-                            continue
-                        
     return itens_extraidos, referencia
 
 def gerar_pdf_unificado(itens, orcamento_db):
@@ -285,7 +311,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
     estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
     
-    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white" style="text-decoration:none;">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
+    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
     btn_zap.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
@@ -329,7 +355,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
     estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
     
-    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white" style="text-decoration:none;">www.minasmateriaiseletricos.com.br</a>'
+    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white">www.minasmateriaiseletricos.com.br</a>'
     
     tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
     tabela_rodape.setStyle(TableStyle([
