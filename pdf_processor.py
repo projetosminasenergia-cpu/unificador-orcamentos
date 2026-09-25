@@ -67,7 +67,6 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                             numeros = ''.join(c for c in partes[1].split('[')[0] if c.isdigit())
                             if numeros: referencia = numeros
 
-            # Configuração especial para tabelas "invisíveis" da Universo Elétrico
             settings = {"vertical_strategy": "text", "horizontal_strategy": "text"} if tipo == 'universo_eletrico' else {}
             tabelas = page.extract_tables(settings)
             
@@ -87,14 +86,11 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                         if tipo == 'universo_eletrico':
                             if len(l) < 3: continue
                             
-                            # --- O ESCUDO PROTETOR CONTRO O LIXO DO CABEÇALHO ---
-                            # Produtos reais da UE têm sempre vírgula (casas decimais) nos últimos 2 blocos de texto
                             if ',' not in l[-1] or ',' not in l[-2]:
                                 continue 
                                 
                             cod = l[0].split('\n')[-1].strip()
                             
-                            # Ignora se o "código" for apenas texto aleatório (ex: "EMP", "BAI")
                             if cod.isalpha(): continue
                             
                             desc = " ".join(l[1:-2]).replace('\n', ' ')
@@ -234,7 +230,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
     estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
     
-    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white" style="text-decoration:none;">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
+    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
     btn_zap.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
@@ -278,7 +274,7 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
     estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
     
-    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white" style="text-decoration:none;">www.minasmateriaiseletricos.com.br</a>'
+    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white">www.minasmateriaiseletricos.com.br</a>'
     
     tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
     tabela_rodape.setStyle(TableStyle([
