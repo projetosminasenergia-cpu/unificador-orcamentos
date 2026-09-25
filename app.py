@@ -14,8 +14,8 @@ db = SQLAlchemy(app)
 class Orcamento(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nome_identificador = db.Column(db.String(150), nullable=False)
-    ref_bling = db.Column(db.String(50)) # Rastreabilidade
-    ref_sp = db.Column(db.String(50))    # Rastreabilidade
+    ref_bling = db.Column(db.String(50)) 
+    ref_sp = db.Column(db.String(50))    
     data_geracao = db.Column(db.DateTime, default=datetime.utcnow)
     valor_total = db.Column(db.Float, default=0.0)
     itens = db.relationship('Item', backref='orcamento', lazy=True)
@@ -37,7 +37,6 @@ with app.app_context():
 def index():
     busca = request.args.get('busca', '')
     if busca:
-        # Filtra pelo nome se o utilizador usar a barra de pesquisa
         historico = Orcamento.query.filter(Orcamento.nome_identificador.ilike(f'%{busca}%')).order_by(Orcamento.data_geracao.desc()).all()
     else:
         historico = Orcamento.query.order_by(Orcamento.data_geracao.desc()).all()
@@ -47,26 +46,31 @@ def index():
 @app.route('/mesclar', methods=['POST'])
 def mesclar():
     nome_identificador = request.form.get('nome_identificador')
-    ref_bling = request.form.get('ref_bling', 'N/A')
-    ref_sp = request.form.get('ref_sp', 'N/A')
     
     pdf_x = request.files.get('pdf_x')
     pdf_y = request.files.get('pdf_y')
 
     itens_consolidados = []
+    ref_bling_extraida = "N/A"
+    ref_sp_extraida = "N/A"
     
     if pdf_x and pdf_x.filename:
-        itens_consolidados.extend(processar_pdfs(pdf_x.read(), tipo='bling'))
+        # Agora ele recebe os itens E a referência automaticamente
+        itens, ref = processar_pdfs(pdf_x.read(), tipo='bling')
+        itens_consolidados.extend(itens)
+        if ref != "N/A": ref_bling_extraida = ref
+        
     if pdf_y and pdf_y.filename:
-        itens_consolidados.extend(processar_pdfs(pdf_y.read(), tipo='system_port'))
+        itens, ref = processar_pdfs(pdf_y.read(), tipo='system_port')
+        itens_consolidados.extend(itens)
+        if ref != "N/A": ref_sp_extraida = ref
 
     if not itens_consolidados:
         return "Nenhum arquivo enviado ou erro na leitura da tabela.", 400
 
     total = sum(float(i.get('valor_total_num', 0)) for i in itens_consolidados)
     
-    # Guarda o orçamento e as referências
-    novo_orcamento = Orcamento(nome_identificador=nome_identificador, ref_bling=ref_bling, ref_sp=ref_sp, valor_total=total)
+    novo_orcamento = Orcamento(nome_identificador=nome_identificador, ref_bling=ref_bling_extraida, ref_sp=ref_sp_extraida, valor_total=total)
     db.session.add(novo_orcamento)
     db.session.commit()
 
@@ -83,7 +87,6 @@ def mesclar():
         db.session.add(novo_item)
     db.session.commit()
 
-    # Passa os metadados (id, nome, refs) para desenhar no PDF
     pdf_buffer = gerar_pdf_unificado(itens_consolidados, novo_orcamento)
     return send_file(pdf_buffer, as_attachment=True, download_name=f"Proposta_{novo_orcamento.id}_{nome_identificador}.pdf", mimetype="application/pdf")
 
