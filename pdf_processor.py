@@ -151,4 +151,40 @@ def gerar_pdf_unificado(itens, orcamento_db):
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('BOTTOMPADDING', (0,0), (-1,0), 8),
         ('TOPPADDING', (0,0), (-1,0), 8),
-        ('GRID',
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+    
+    elements.append(tabela_itens)
+    elements.append(Spacer(1, 20))
+
+    total_formatado = f"R$ {total_geral:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    soma_qtdes_formatada = f"{soma_qtdes:.2f}".rstrip('0').rstrip('.') if soma_qtdes % 1 != 0 else str(int(soma_qtdes))
+    
+    dados_resumo = [
+        ["N° de Itens", "Soma das Qtdes", "TOTAL DA PROPOSTA"],
+        [str(num_itens), soma_qtdes_formatada, total_formatado]
+    ]
+    
+    tabela_resumo = Table(dados_resumo, colWidths=[100, 100, 140])
+    tabela_resumo.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EAEAEA")),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTNAME', (2,1), (2,1), 'Helvetica-Bold'), 
+        ('TEXTCOLOR', (2,1), (2,1), colors.HexColor("#B31B1B")), 
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('TOPPADDING', (0,0), (-1,-1), 8),
+    ]))
+    tabela_resumo.hAlign = 'RIGHT'
+    elements.append(tabela_resumo)
+    elements.append(Spacer(1, 40))
+
+    elements.append(Paragraph("Atenciosamente,", estilo_normal))
+    elements.append(Spacer(1, 5))
+    elements.append(Paragraph("<b>Departamento de vendas</b><br/>Minas Materiais Elétricos", estilo_normal))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
