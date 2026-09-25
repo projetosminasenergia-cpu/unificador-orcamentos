@@ -12,24 +12,57 @@ def processar_pdfs(pdf_bytes, tipo):
             tabelas = page.extract_tables()
             for tabela in tabelas:
                 for linha in tabela:
-                    if not linha or "Código" in str(linha[0]) or "Produto" in str(linha[0]):
-                        continue
+                    # Limpa a linha e transforma tudo em texto
+                    l = [str(celula).strip() if celula else "" for celula in linha]
+                    texto_linha = " ".join(l).upper()
+
+                    # Ignora linhas vazias ou cabeçalhos/rodapés que o sistema tenta ler como produto
+                    if not texto_linha.strip(): continue
+                    if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
+                    if "VENCIMENTO" in texto_linha or "TOTAL" in texto_linha or "Nº DE ITENS" in texto_linha: continue
+                    if "IMAGEM" in texto_linha or "AVISTA" in texto_linha: continue
+
                     try:
-                        # Extração inicial genérica (ajustaremos conforme o layout real dos seus PDFs)
-                        qtd = str(linha[2] if tipo == 'bling' else linha[3]).replace(',', '.')
-                        v_unit = str(linha[4]).replace('R$', '').replace('.', '').replace(',', '.').strip()
-                        v_tot = str(linha[5]).replace('R$', '').replace('.', '').replace(',', '.').strip()
+                        # Extração do Bling
+                        if tipo == 'bling':
+                            if len(l) < 6: continue
+                            cod = l[0]
+                            desc = l[1].replace('\n', ' ')
+                            qtd_str = l[2].replace(',', '.')
+                            unid = l[3]
+                            v_unit_str = l[4].replace('R$', '').replace('.', '').replace(',', '.')
+                            v_tot_str = l[5].replace('R$', '').replace('.', '').replace(',', '.')
                         
+                        # Extração do System Port (Ajustada conforme o seu log)
+                        else:
+                            if len(l) < 6: continue
+                            cod = l[1] # O log mostrou que o código está aqui
+                            desc = l[2].replace('\n', ' ') # A descrição está aqui
+                            unid = l[3] if len(l) > 3 else "UN"
+                            qtd_str = l[4].replace(',', '.') if len(l) > 4 else "0"
+                            v_unit_str = l[5].replace('R$', '').replace('.', '').replace(',', '.') if len(l) > 5 else "0"
+                            v_tot_str = l[6].replace('R$', '').replace('.', '').replace(',', '.') if len(l) > 6 else v_unit_str
+
+                        # Converte números com segurança
+                        qtd = float(qtd_str) if qtd_str.replace('.','',1).isdigit() else 0.0
+                        v_unit = float(v_unit_str) if v_unit_str.replace('.','',1).isdigit() else 0.0
+                        v_tot = float(v_tot_str) if v_tot_str.replace('.','',1).isdigit() else (qtd * v_unit)
+
+                        # Se não tem quantidade nem preço, não é um produto real (filtra sujeiras)
+                        if qtd == 0 and v_unit == 0:
+                            continue
+
                         item = {
-                            "codigo": str(linha[0] if tipo == 'bling' else "N/A"),
-                            "descricao": str(linha[1]).replace('\n', ' '),
-                            "quantidade": float(qtd) if qtd.replace('.','',1).isdigit() else 0,
-                            "unidade": str(linha[3] if tipo == 'bling' else linha[2]),
-                            "valor_unitario_num": float(v_unit) if v_unit.replace('.','',1).isdigit() else 0,
-                            "valor_total_num": float(v_tot) if v_tot.replace('.','',1).isdigit() else 0
+                            "codigo": cod[:100], # Trava tamanho para não quebrar o banco
+                            "descricao": desc[:250],
+                            "quantidade": qtd,
+                            "unidade": unid[:20], # Trava em 20 letras para evitar erro 500
+                            "valor_unitario_num": v_unit,
+                            "valor_total_num": v_tot
                         }
                         itens_extraidos.append(item)
-                    except Exception:
+                    except Exception as e:
+                        print("Ignorando linha problemática:", l)
                         continue
     return itens_extraidos
 
