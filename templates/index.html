@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Unificador de Orçamentos - Minas Materiais</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f4f4f9; }
+        .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        input, button { padding: 10px; margin-top: 5px; width: 100%; box-sizing: border-box; }
+        button { background: #0056b3; color: white; border: none; cursor: pointer; margin-top: 15px; border-radius: 4px; font-weight: bold;}
+        button:hover { background: #004494; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 10px; border-bottom: 1px solid #ddd; text-align: left; }
+        a.btn { background: #28a745; color: white; padding: 8px 12px; text-decoration: none; border-radius: 4px; font-size: 14px;}
+        a.btn:hover { background: #218838; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Criar Novo Orçamento Unificado</h2>
+        <form action="/mesclar" method="POST" enctype="multipart/form-data">
+            <label>Nome do Orçamento (Ex: Orçamento UFV):</label>
+            <input type="text" name="nome_identificador" required placeholder="Digite o nome do cliente ou obra">
+            <br><br>
+            <label>PDF Empresa X (Bling) - Minas Materiais:</label>
+            <input type="file" name="pdf_x" accept=".pdf">
+            <br><br>
+            <label>PDF Empresa Y (System Port) - Minas Painéis:</label>
+            <input type="file" name="pdf_y" accept=".pdf">
+            <button type="submit">Mesclar e Baixar PDF</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Orçamentos Emitidos</h2>
+        <table>
+            <tr>
+                <th>Identificação</th>
+                <th>Data</th>
+                <th>Valor Total</th>
+                <th>Ação</th>
+            </tr>
+            {% for orc in historico %}
+            <tr>
+                <td>{{ orc.nome_identificador }}</td>
+                <td>{{ orc.data_geracao.strftime('%d/%m/%Y %H:%M') }}</td>
+                <td>R$ {{ "%.2f"|format(orc.valor_total) }}</td>
+                <td><a href="/baixar_pdf/{{ orc.id }}" class="btn">Visualizar PDF</a></td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4">Nenhum orçamento gerado ainda.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</body>
+</html>
