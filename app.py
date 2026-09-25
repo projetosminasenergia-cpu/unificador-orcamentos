@@ -16,7 +16,7 @@ class Orcamento(db.Model):
     nome_identificador = db.Column(db.String(150), nullable=False)
     ref_bling = db.Column(db.String(50)) 
     ref_sp = db.Column(db.String(50)) 
-    ref_ue = db.Column(db.String(50)) # Nova coluna da Universo Eletrico
+    ref_ue = db.Column(db.String(50)) 
     data_geracao = db.Column(db.DateTime, default=datetime.utcnow)
     valor_total = db.Column(db.Float, default=0.0)
     itens = db.relationship('Item', backref='orcamento', lazy=True)
@@ -34,6 +34,13 @@ class Item(db.Model):
 with app.app_context():
     db.create_all()
 
+# --- ROTA MÁGICA PARA ATUALIZAR O BANCO DE DADOS ---
+@app.route('/atualizar-banco')
+def atualizar_banco():
+    db.drop_all()    # Apaga toda a estrutura velha travada
+    db.create_all()  # Cria a estrutura nova e limpa
+    return "<h1>Banco de dados atualizado com sucesso!</h1><p>Todas as colunas (incluindo a da Universo Elétrico) foram criadas.</p><a href='/'>Clique aqui para voltar ao sistema</a>"
+
 @app.route('/', methods=['GET'])
 def index():
     busca = request.args.get('busca', '')
@@ -48,7 +55,6 @@ def index():
 def mesclar():
     nome_identificador = request.form.get('nome_identificador')
     
-    # Captura a margem % digitada (Se vier vazia, usa 0)
     margem_ue_str = request.form.get('margem_ue', '0')
     try:
         margem_ue = float(margem_ue_str.replace(',', '.'))
@@ -57,7 +63,7 @@ def mesclar():
     
     pdf_x = request.files.get('pdf_x')
     pdf_y = request.files.get('pdf_y')
-    pdf_z = request.files.get('pdf_z') # Arquivo da Universo Eletrico
+    pdf_z = request.files.get('pdf_z') 
 
     itens_consolidados = []
     ref_bling_extraida = "N/A"
