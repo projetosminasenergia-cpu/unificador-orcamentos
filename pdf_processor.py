@@ -113,12 +113,11 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                     if not tabela: continue
                     for linha in tabela:
                         if not linha: continue
-                        
-                        # Preserva as colunas separadas para não misturar código com descrição
                         l_bruta = [str(celula).strip() if celula else "" for celula in linha]
                         l = [c for c in l_bruta if c != ""]
                         if not l: continue
                         
+                        # Transforma a linha numa string contínua
                         texto_linha = " ".join(l).upper().replace('\n', ' ')
 
                         if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
@@ -126,36 +125,31 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                         if "IMAGEM" in texto_linha or "AVISTA" in texto_linha or "ÍTEM" in texto_linha: continue
 
                         try:
-                            if len(l) < 5: continue
+                            # NOVA LÓGICA: Corta a linha por espaços (ignora se a tabela colou ou não as colunas)
+                            parts = texto_linha.split()
+                            if len(parts) < 6: continue
                             
-                            unid = l[-4][:20]
-                            # Escudo anti-lixo: se a unidade não for letra (ex: "0,00"), pula a linha
+                            unid = parts[-4][:20]
+                            # ESCUDO ANTI-LIXO: Se a unidade não tiver letras (ex: "0,00"), ignora a linha toda!
                             if not any(c.isalpha() for c in unid): continue
                             
-                            qtd, v_unit, v_tot = limpar_numero(l[-3]), limpar_numero(l[-2]), limpar_numero(l[-1])
+                            qtd, v_unit, v_tot = limpar_numero(parts[-3]), limpar_numero(parts[-2]), limpar_numero(parts[-1])
                             if qtd == 0 and v_unit == 0: continue
                             
                             if tipo == 'bling':
-                                if len(l) >= 6:
-                                    cod = l[-5]
-                                    desc = l[1].replace('\n', ' ')
+                                cod = parts[-5]
+                                if parts[0].isdigit():
+                                    desc = " ".join(parts[1:-5])
                                 else:
-                                    cod = "N/A"
-                                    desc = l[1].replace('\n', ' ') if len(l) > 1 else ""
+                                    desc = " ".join(parts[:-5])
                                     
                             elif tipo == 'system_port':
-                                if len(l) >= 7:
-                                    cod = l[1]
-                                    desc = l[2].replace('\n', ' ')
+                                if parts[0].isdigit() and len(parts[0]) <= 4:
+                                    cod = parts[1]
+                                    desc = " ".join(parts[2:-4])
                                 else:
-                                    # Proteção caso a descrição esbarre no código (ex: DPS)
-                                    partes_desc = l[1].split()
-                                    if len(partes_desc) > 1 and partes_desc[0].isdigit():
-                                        cod = partes_desc[0]
-                                        desc = " ".join(partes_desc[1:]).replace('\n', ' ')
-                                    else:
-                                        cod = l[1] if len(l) > 1 else "N/A"
-                                        desc = l[1].replace('\n', ' ') if len(l) > 1 else ""
+                                    cod = parts[0]
+                                    desc = " ".join(parts[1:-4])
 
                             itens_extraidos.append({"codigo": cod[:100], "descricao": desc[:250], "quantidade": qtd, "unidade": unid, "valor_unitario_num": v_unit, "valor_total_num": v_tot})
                         except Exception as e:
