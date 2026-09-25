@@ -6,7 +6,6 @@ from pdf_processor import processar_pdfs, gerar_pdf_unificado
 
 app = Flask(__name__)
 
-# Conecta ao Neon usando a variável de ambiente do Render
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -15,6 +14,8 @@ db = SQLAlchemy(app)
 class Orcamento(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nome_identificador = db.Column(db.String(150), nullable=False)
+    ref_bling = db.Column(db.String(50)) # Rastreabilidade
+    ref_sp = db.Column(db.String(50))    # Rastreabilidade
     data_geracao = db.Column(db.DateTime, default=datetime.utcnow)
     valor_total = db.Column(db.Float, default=0.0)
     itens = db.relationship('Item', backref='orcamento', lazy=True)
@@ -34,12 +35,21 @@ with app.app_context():
 
 @app.route('/', methods=['GET'])
 def index():
-    historico = Orcamento.query.order_by(Orcamento.data_geracao.desc()).all()
-    return render_template('index.html', historico=historico)
+    busca = request.args.get('busca', '')
+    if busca:
+        # Filtra pelo nome se o utilizador usar a barra de pesquisa
+        historico = Orcamento.query.filter(Orcamento.nome_identificador.ilike(f'%{busca}%')).order_by(Orcamento.data_geracao.desc()).all()
+    else:
+        historico = Orcamento.query.order_by(Orcamento.data_geracao.desc()).all()
+    
+    return render_template('index.html', historico=historico, busca=busca)
 
 @app.route('/mesclar', methods=['POST'])
 def mesclar():
     nome_identificador = request.form.get('nome_identificador')
+    ref_bling = request.form.get('ref_bling', 'N/A')
+    ref_sp = request.form.get('ref_sp', 'N/A')
+    
     pdf_x = request.files.get('pdf_x')
     pdf_y = request.files.get('pdf_y')
 
@@ -51,10 +61,12 @@ def mesclar():
         itens_consolidados.extend(processar_pdfs(pdf_y.read(), tipo='system_port'))
 
     if not itens_consolidados:
-        return "Nenhum arquivo enviado ou erro na leitura da tabela. Verifique o layout do PDF.", 400
+        return "Nenhum arquivo enviado ou erro na leitura da tabela.", 400
 
     total = sum(float(i.get('valor_total_num', 0)) for i in itens_consolidados)
-    novo_orcamento = Orcamento(nome_identificador=nome_identificador, valor_total=total)
+    
+    # Guarda o orçamento e as referências
+    novo_orcamento = Orcamento(nome_identificador=nome_identificador, ref_bling=ref_bling, ref_sp=ref_sp, valor_total=total)
     db.session.add(novo_orcamento)
     db.session.commit()
 
@@ -71,8 +83,9 @@ def mesclar():
         db.session.add(novo_item)
     db.session.commit()
 
-    pdf_buffer = gerar_pdf_unificado(itens_consolidados)
-    return send_file(pdf_buffer, as_attachment=True, download_name=f"{nome_identificador}.pdf", mimetype="application/pdf")
+    # Passa os metadados (id, nome, refs) para desenhar no PDF
+    pdf_buffer = gerar_pdf_unificado(itens_consolidados, novo_orcamento)
+    return send_file(pdf_buffer, as_attachment=True, download_name=f"Proposta_{novo_orcamento.id}_{nome_identificador}.pdf", mimetype="application/pdf")
 
 @app.route('/baixar_pdf/<int:id_orcamento>')
 def baixar_pdf(id_orcamento):
@@ -88,8 +101,8 @@ def baixar_pdf(id_orcamento):
             'valor_total_num': item.valor_total
         })
         
-    pdf_buffer = gerar_pdf_unificado(itens)
-    return send_file(pdf_buffer, as_attachment=True, download_name=f"{orcamento.nome_identificador}.pdf", mimetype="application/pdf")
+    pdf_buffer = gerar_pdf_unificado(itens, orcamento)
+    return send_file(pdf_buffer, as_attachment=True, download_name=f"Proposta_{orcamento.id}_{orcamento.nome_identificador}.pdf", mimetype="application/pdf")
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000, host='0.0.0.0')
