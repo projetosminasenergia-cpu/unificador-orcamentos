@@ -9,7 +9,6 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
-# Escudo Protetor contra símbolos que quebram o PDF (&, <, >)
 def safe_xml(texto):
     if not texto: return ""
     return str(texto).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -114,42 +113,50 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                     if not tabela: continue
                     for linha in tabela:
                         if not linha: continue
+                        
+                        # Preserva as colunas separadas para não misturar código com descrição
                         l_bruta = [str(celula).strip() if celula else "" for celula in linha]
                         l = [c for c in l_bruta if c != ""]
                         if not l: continue
-                        texto_linha = " ".join(l).upper()
+                        
+                        texto_linha = " ".join(l).upper().replace('\n', ' ')
 
                         if "CÓDIGO" in texto_linha or "DESCRIÇÃO" in texto_linha or "SOMA DAS" in texto_linha: continue
                         if "VENCIMENTO" in texto_linha or "TOTAL" in texto_linha or "Nº DE ITENS" in texto_linha: continue
                         if "IMAGEM" in texto_linha or "AVISTA" in texto_linha or "ÍTEM" in texto_linha: continue
 
                         try:
-                            # NOVA LÓGICA: Contagem de trás para a frente (Infalível contra nomes gigantes)
+                            if len(l) < 5: continue
+                            
+                            unid = l[-4][:20]
+                            # Escudo anti-lixo: se a unidade não for letra (ex: "0,00"), pula a linha
+                            if not any(c.isalpha() for c in unid): continue
+                            
+                            qtd, v_unit, v_tot = limpar_numero(l[-3]), limpar_numero(l[-2]), limpar_numero(l[-1])
+                            if qtd == 0 and v_unit == 0: continue
+                            
                             if tipo == 'bling':
-                                if len(l) < 6: continue
-                                unid = l[-4][:20]
-                                qtd, v_unit, v_tot = limpar_numero(l[-3]), limpar_numero(l[-2]), limpar_numero(l[-1])
-                                
-                                if len(l) >= 7:
+                                if len(l) >= 6:
                                     cod = l[-5]
-                                    desc = " ".join(l[1:-5]).replace('\n', ' ')
+                                    desc = l[1].replace('\n', ' ')
                                 else:
                                     cod = "N/A"
-                                    desc = " ".join(l[1:-4]).replace('\n', ' ')
+                                    desc = l[1].replace('\n', ' ') if len(l) > 1 else ""
                                     
-                            elif tipo == 'system_port': 
-                                if len(l) < 6: continue
-                                unid = l[-4][:20]
-                                qtd, v_unit, v_tot = limpar_numero(l[-3]), limpar_numero(l[-2]), limpar_numero(l[-1])
-                                
+                            elif tipo == 'system_port':
                                 if len(l) >= 7:
                                     cod = l[1]
-                                    desc = " ".join(l[2:-4]).replace('\n', ' ')
+                                    desc = l[2].replace('\n', ' ')
                                 else:
-                                    cod = l[0]
-                                    desc = " ".join(l[1:-4]).replace('\n', ' ')
+                                    # Proteção caso a descrição esbarre no código (ex: DPS)
+                                    partes_desc = l[1].split()
+                                    if len(partes_desc) > 1 and partes_desc[0].isdigit():
+                                        cod = partes_desc[0]
+                                        desc = " ".join(partes_desc[1:]).replace('\n', ' ')
+                                    else:
+                                        cod = l[1] if len(l) > 1 else "N/A"
+                                        desc = l[1].replace('\n', ' ') if len(l) > 1 else ""
 
-                            if qtd == 0 and v_unit == 0: continue
                             itens_extraidos.append({"codigo": cod[:100], "descricao": desc[:250], "quantidade": qtd, "unidade": unid, "valor_unitario_num": v_unit, "valor_total_num": v_tot})
                         except Exception as e:
                             continue
