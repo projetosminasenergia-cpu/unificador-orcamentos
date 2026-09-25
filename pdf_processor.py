@@ -26,25 +26,23 @@ def processar_pdfs(pdf_bytes, tipo):
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
             
-            # 1. Tentar ler o número do orçamento (Agora à prova de falhas)
+            # 1. Leitura automática do número da proposta (Ignorando quebras vazias)
             texto = page.extract_text()
             if texto:
-                # Remove todas as linhas vazias invisíveis
                 linhas_texto = [linha.strip() for linha in texto.split('\n') if linha.strip()]
                 for i, linha in enumerate(linhas_texto):
-                    # Procura o número no Bling
+                    # Procura Bling
                     if tipo == 'bling' and "PROPOSTA N" in linha.upper():
                         numeros = ''.join(c for c in linha if c.isdigit())
                         if numeros: referencia = numeros
                     
-                    # Procura o número no System Port
+                    # Procura System Port
                     elif tipo == 'system_port' and "ORÇAMENTO SIMPLES" in linha.upper():
                         if i + 1 < len(linhas_texto):
-                            # Pega a próxima linha (que agora garantidamente não é vazia)
                             possivel_ref = ''.join(c for c in linhas_texto[i+1] if c.isdigit())
                             if possivel_ref: referencia = possivel_ref
 
-            # 2. Ler as tabelas de itens
+            # 2. Leitura da tabela de produtos
             tabelas = page.extract_tables()
             for tabela in tabelas:
                 for linha in tabela:
@@ -76,7 +74,7 @@ def processar_pdfs(pdf_bytes, tipo):
 
 def gerar_pdf_unificado(itens, orcamento_db):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=25, bottomMargin=25)
     elements = []
     styles = getSampleStyleSheet()
     
@@ -85,9 +83,10 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_direita = ParagraphStyle('Direita', parent=styles['Normal'], alignment=TA_RIGHT, fontSize=9)
     estilo_centro_bold = ParagraphStyle('CentroBold', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, fontName='Helvetica-Bold', textColor=colors.white)
 
-    # 1. LOGO E CABEÇALHO
+    # 1. CABEÇALHO (Logo maior e com proporção correta)
     try:
-        logo = RLImage('logo.png', width=120, height=45)
+        # 140px por 70px mantém a proporção 2:1 original sem distorcer
+        logo = RLImage('logo.png', width=140, height=70)
     except:
         logo = Paragraph("<b>MINAS MATERIAIS ELÉTRICOS</b>", estilo_normal)
 
@@ -96,14 +95,14 @@ def gerar_pdf_unificado(itens, orcamento_db):
                        35431404 - Ponte Nova, MG<br/>
                        Telefone: (31) 99585-2164 | CNPJ: 64.705.243/0001-08"""
     
-    tabela_cabecalho = Table([[logo, Paragraph(dados_empresa, estilo_direita)]], colWidths=[150, 385])
+    tabela_cabecalho = Table([[logo, Paragraph(dados_empresa, estilo_direita)]], colWidths=[160, 375])
     tabela_cabecalho.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
     ]))
     elements.append(tabela_cabecalho)
     elements.append(Spacer(1, 10))
 
-    # 2. CAIXA DE IDENTIFICAÇÃO DO ORÇAMENTO
+    # 2. IDENTIFICAÇÃO DO ORÇAMENTO
     num_proposta_formatado = f"{300 + orcamento_db.id:05d}"
     data_hoje = orcamento_db.data_geracao.strftime("%d/%m/%Y")
     
@@ -122,11 +121,11 @@ def gerar_pdf_unificado(itens, orcamento_db):
         ('BOX', (0,0), (-1,-1), 1, colors.HexColor("#DDDDDD")),
         ('BOTTOMPADDING', (0,0), (-1,0), 6),
         ('TOPPADDING', (0,0), (-1,0), 6),
-        ('BOTTOMPADDING', (0,1), (-1,1), 10),
-        ('TOPPADDING', (0,1), (-1,1), 10),
+        ('BOTTOMPADDING', (0,1), (-1,1), 8),
+        ('TOPPADDING', (0,1), (-1,1), 8),
     ]))
     elements.append(tabela_identificacao)
-    elements.append(Spacer(1, 20))
+    elements.append(Spacer(1, 15))
 
     # 3. TABELA DE ITENS
     dados_tabela = [["Código", "Descrição do produto", "Un", "Qtd", "V. Unitário", "V. Total"]]
@@ -147,21 +146,21 @@ def gerar_pdf_unificado(itens, orcamento_db):
 
     tabela_itens = Table(dados_tabela, colWidths=[60, 245, 30, 40, 75, 85])
     tabela_itens.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#404040")), 
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#333333")), 
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('ALIGN', (0,0), (-1,0), 'LEFT'),
         ('ALIGN', (2,0), (-1,-1), 'CENTER'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0,0), (-1,0), 8),
-        ('TOPPADDING', (0,0), (-1,0), 8),
+        ('BOTTOMPADDING', (0,0), (-1,0), 7),
+        ('TOPPADDING', (0,0), (-1,0), 7),
         ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
     ]))
     
     elements.append(tabela_itens)
-    elements.append(Spacer(1, 20))
+    elements.append(Spacer(1, 15))
 
-    # 4. TABELA DE RESUMO
+    # 4. TABELA DE RESUMO (Total em Verde Escuro Elegante)
     total_formatado = f"R$ {total_geral:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     soma_qtdes_formatada = f"{soma_qtdes:.2f}".rstrip('0').rstrip('.') if soma_qtdes % 1 != 0 else str(int(soma_qtdes))
     
@@ -176,18 +175,20 @@ def gerar_pdf_unificado(itens, orcamento_db):
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('FONTNAME', (2,1), (2,1), 'Helvetica-Bold'), 
-        ('TEXTCOLOR', (2,1), (2,1), colors.HexColor("#B31B1B")), 
+        ('TEXTCOLOR', (2,1), (2,1), colors.HexColor("#1B5E20")), # Verde Escuro Corporativo
         ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-        ('TOPPADDING', (0,0), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,0), 7),
+        ('TOPPADDING', (0,0), (-1,0), 7),
+        ('BOTTOMPADDING', (0,1), (-1,1), 8),
+        ('TOPPADDING', (0,1), (-1,1), 8),
     ]))
     tabela_resumo.hAlign = 'RIGHT'
     elements.append(tabela_resumo)
-    elements.append(Spacer(1, 40))
+    elements.append(Spacer(1, 30))
 
-    # 5. RODAPÉ
+    # 5. ASSINATURA
     elements.append(Paragraph("Atenciosamente,", estilo_normal))
-    elements.append(Spacer(1, 5))
+    elements.append(Spacer(1, 4))
     elements.append(Paragraph("<b>Departamento de vendas</b><br/>Minas Materiais Elétricos", estilo_normal))
 
     doc.build(elements)
