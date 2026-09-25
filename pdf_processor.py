@@ -14,7 +14,6 @@ def limpar_numero(texto):
     t = ''.join(c for c in t if c.isdigit() or c in '.,')
     if not t: return 0.0
     
-    # Nova inteligência para lidar com números grandes (ex: 1.083,80 ou 1,083,80)
     if t.count(',') > 1:
         parts = t.rsplit(',', 1)
         t = parts[0].replace(',', '') + '.' + parts[1]
@@ -48,7 +47,6 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
         for page in pdf.pages:
             texto = page.extract_text()
             
-            # --- 1. LEITURA DAS REFERÊNCIAS ---
             if texto:
                 linhas_texto = [linha.strip() for linha in texto.split('\n') if linha.strip()]
                 for i, linha in enumerate(linhas_texto):
@@ -69,8 +67,6 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                             numeros = ''.join(c for c in partes[1].split('[')[0] if c.isdigit())
                             if numeros: referencia = numeros
 
-            # --- 2. LEITURA DA TABELA (COM ESTRATÉGIA PARA TABELAS SEM BORDAS) ---
-            # Se for Universo Elétrico, forçamos o leitor a procurar colunas pelo alinhamento do texto
             settings = {"vertical_strategy": "text", "horizontal_strategy": "text"} if tipo == 'universo_eletrico' else {}
             tabelas = page.extract_tables(settings)
             
@@ -89,7 +85,7 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                     try:
                         if tipo == 'universo_eletrico':
                             if len(l) < 3: continue
-                            cod = l[0].split('\n')[-1].strip() # Limpa índices (ex: "2 \n 80009" vira "80009")
+                            cod = l[0].split('\n')[-1].strip()
                             desc = " ".join(l[1:-2]).replace('\n', ' ')
                             unid = "UN"
                             v_unit_base = limpar_numero(l[-2])
@@ -117,8 +113,6 @@ def processar_pdfs(pdf_bytes, tipo, margem=0.0):
                     except Exception as e:
                         continue
             
-            # --- 3. PLANO B DE EMERGÊNCIA PARA A UNIVERSO ELÉTRICO ---
-            # Se a tabela falhar completamente, o sistema "pesca" os produtos linha a linha lendo o texto bruto
             if tipo == 'universo_eletrico' and not itens_extraidos and texto:
                 linhas_texto = texto.split('\n')
                 for linha in linhas_texto:
@@ -263,7 +257,8 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
     estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
     
-    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white" style="text-decoration:none;">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
+    # === AQUI ESTAVA O ERRO! FOI REMOVIDO ===
+    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
     btn_zap.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
@@ -307,7 +302,8 @@ def gerar_pdf_unificado(itens, orcamento_db):
     estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
     estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
     
-    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white" style="text-decoration:none;">www.minasmateriaiseletricos.com.br</a>'
+    # === AQUI ESTAVA O ERRO TAMBÉM! FOI REMOVIDO ===
+    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white">www.minasmateriaiseletricos.com.br</a>'
     
     tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
     tabela_rodape.setStyle(TableStyle([
