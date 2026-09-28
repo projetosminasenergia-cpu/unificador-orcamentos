@@ -269,4 +269,128 @@ def gerar_pdf_unificado(itens, orcamento_db):
         ('TOPPADDING', (0,0), (-1,1), 8),
     ]))
     elements.append(tabela_identificacao)
-    elements.append(Spacer(1,
+    elements.append(Spacer(1, 15))
+
+    dados_tabela = [["Código", "Descrição do produto", "Un", "Qtd", "V. Unitário", "V. Total"]]
+    total_geral = 0.0
+    soma_qtdes = 0.0
+    
+    for item in itens:
+        v_unit_str = f"R$ {item.get('valor_unitario_num', 0):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+        v_tot_str = f"R$ {item.get('valor_total_num', 0):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+        total_geral += float(item.get('valor_total_num', 0))
+        soma_qtdes += float(item.get('quantidade', 0))
+        
+        desc_safe = safe_xml(item.get('descricao', ''))
+        desc_paragraph = Paragraph(desc_safe, estilo_desc)
+        
+        qtd_formatada = f"{item.get('quantidade', 0):.2f}".rstrip('0').rstrip('.') if item.get('quantidade', 0) % 1 != 0 else str(int(item.get('quantidade', 0)))
+
+        dados_tabela.append([safe_xml(item.get('codigo', '')), desc_paragraph, safe_xml(item.get('unidade', '')), qtd_formatada, v_unit_str, v_tot_str])
+
+    tabela_itens = Table(dados_tabela, colWidths=[60, 245, 30, 40, 75, 85])
+    tabela_itens.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#333333")), 
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('ALIGN', (0,0), (-1,0), 'LEFT'),
+        ('ALIGN', (2,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0,0), (-1,0), 7),
+        ('TOPPADDING', (0,0), (-1,0), 7),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+    elements.append(tabela_itens)
+    elements.append(Spacer(1, 15))
+
+    total_formatado = f"R$ {total_geral:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    soma_qtdes_formatada = f"{soma_qtdes:.2f}".rstrip('0').rstrip('.') if soma_qtdes % 1 != 0 else str(int(soma_qtdes))
+    
+    dados_resumo = [
+        ["N° de Itens", "Soma das Qtdes", "TOTAL DA PROPOSTA"],
+        [str(len(itens)), soma_qtdes_formatada, total_formatado]
+    ]
+    
+    tabela_resumo = Table(dados_resumo, colWidths=[100, 100, 140])
+    tabela_resumo.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EAEAEA")),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTNAME', (2,1), (2,1), 'Helvetica-Bold'), 
+        ('TEXTCOLOR', (2,1), (2,1), colors.HexColor("#1B5E20")), 
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+        ('BOTTOMPADDING', (0,0), (-1,1), 7),
+        ('TOPPADDING', (0,0), (-1,1), 7),
+    ]))
+    tabela_resumo.hAlign = 'RIGHT'
+    elements.append(tabela_resumo)
+    elements.append(Spacer(1, 20))
+
+    whatsapp_url = "https://wa.me/5531995852164?text=Ol%C3%A1%21%20Tudo%20bem%3F%0A%0ARecebi%20o%20or%C3%A7amento%20e%20gostaria%20de%20tirar%20algumas%20d%C3%BAvidas%20antes%20de%20prosseguir."
+    qr_buffer = gerar_qr_code(whatsapp_url)
+    img_qr = RLImage(qr_buffer, width=65, height=65)
+
+    estilo_duvida_titulo = ParagraphStyle('DuvidaTitulo', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.HexColor("#1e2b4d"))
+    estilo_duvida_texto = ParagraphStyle('DuvidaTexto', parent=styles['Normal'], fontSize=8, textColor=colors.gray)
+    estilo_zap = ParagraphStyle('Zap', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=TA_CENTER)
+    
+    btn_zap = Table([[Paragraph(f'<a href="{whatsapp_url}" color="white" style="text-decoration:none;">Falar pelo WhatsApp</a>', estilo_zap)]], colWidths=[110], rowHeights=[22])
+    btn_zap.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#25D366")),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+
+    bloco_esq = [
+        Paragraph("Ficou com alguma dúvida sobre seu orçamento?", estilo_duvida_titulo),
+        Spacer(1, 4),
+        Paragraph("Nossa equipe está pronta para atendê-lo.", estilo_duvida_texto),
+        Spacer(1, 8),
+        btn_zap
+    ]
+
+    estilo_qr_texto = ParagraphStyle('QRTexto', parent=styles['Normal'], fontSize=7, textColor=colors.gray, alignment=TA_CENTER)
+    bloco_meio = [
+        Paragraph("Ou escaneie o QR Code<br/>para conversar conosco:", estilo_qr_texto),
+        Spacer(1, 3),
+        img_qr
+    ]
+
+    try:
+        logo_ilustra = RLImage('logo.png', width=100, height=50)
+    except:
+        logo_ilustra = Paragraph(" ", estilo_normal)
+
+    tabela_banner = Table([[bloco_esq, bloco_meio, logo_ilustra]], colWidths=[187, 161, 187])
+    tabela_banner.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F4F6F9")), 
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (1,0), (1,0), 'CENTER'),
+        ('ALIGN', (2,0), (2,0), 'RIGHT'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+        ('TOPPADDING', (0,0), (-1,-1), 12),
+        ('LEFTPADDING', (0,0), (0,0), 15),
+        ('RIGHTPADDING', (2,0), (2,0), 15),
+    ]))
+    elements.append(tabela_banner)
+    
+    estilo_rodape = ParagraphStyle('Rodape', parent=styles['Normal'], fontSize=8, textColor=colors.white)
+    estilo_rodape_centro = ParagraphStyle('RodapeC', parent=estilo_rodape, alignment=TA_CENTER)
+    estilo_rodape_dir = ParagraphStyle('RodapeD', parent=estilo_rodape, alignment=TA_RIGHT)
+    
+    link_site = '<a href="https://www.minasmateriaiseletricos.com.br/" color="white" style="text-decoration:none;">www.minasmateriaiseletricos.com.br</a>'
+    
+    tabela_rodape = Table([[Paragraph(link_site, estilo_rodape), Paragraph("Ponte Nova - MG", estilo_rodape_centro), Paragraph("(31) 99585-2164", estilo_rodape_dir)]], colWidths=[178, 179, 178])
+    tabela_rodape.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#1e2b4d")), 
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('TOPPADDING', (0,0), (-1,-1), 8),
+        ('LEFTPADDING', (0,0), (-1,-1), 15),
+        ('RIGHTPADDING', (0,0), (-1,-1), 15),
+    ]))
+    elements.append(tabela_rodape)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
