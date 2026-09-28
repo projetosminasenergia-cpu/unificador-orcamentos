@@ -8,8 +8,8 @@ from pdf_processor import processar_pdfs, gerar_pdf_unificado
 app = Flask(__name__)
 
 # --- CONFIGURAÇÕES DE SEGURANÇA E SENHA ---
-app.secret_key = 'chave_secreta_super_segura_minas' # Necessário para o sistema se lembrar de quem entrou
-SENHA_SISTEMA = "minasme2026!" # <--- ALTERE A SUA SENHA AQUI SE DESEJAR!
+app.secret_key = 'chave_secreta_super_segura_minas'
+SENHA_SISTEMA = "minas2026"
 
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -66,7 +66,7 @@ def logout():
     session.pop('logado', None)
     return redirect(url_for('login'))
 
-# --- ROTAS DO SISTEMA (AGORA PROTEGIDAS) ---
+# --- ROTAS DO SISTEMA PROTEGIDAS ---
 
 @app.route('/atualizar-banco')
 @login_required
@@ -74,6 +74,29 @@ def atualizar_banco():
     db.drop_all()
     db.create_all()
     return "<h1>Banco de dados atualizado com sucesso!</h1><a href='/'>Clique aqui para voltar ao sistema</a>"
+
+# ROTA SECRETA PARA APAGAR OS TESTES!
+@app.route('/limpar-testes')
+@login_required
+def limpar_testes():
+    # Procura tudo que tenha a palavra "teste" no nome do projeto (ignora maiúsculas/minúsculas)
+    testes = Orcamento.query.filter(Orcamento.nome_identificador.ilike('%teste%')).all()
+    quantidade = len(testes)
+    
+    for t in testes:
+        Item.query.filter_by(orcamento_id=t.id).delete() # Apaga os produtos do teste
+        db.session.delete(t) # Apaga o orçamento de teste
+        
+    db.session.commit()
+    
+    return f"""
+    <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+        <h1 style="color: #28a745;">Limpeza Concluída!</h1>
+        <p><b>{quantidade}</b> orçamentos com a palavra 'TESTE' foram apagados definitivamente do sistema.</p>
+        <br><br>
+        <a href="/" style="background: #1e2b4d; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Voltar ao Painel Principal</a>
+    </div>
+    """
 
 @app.route('/', methods=['GET'])
 @login_required
